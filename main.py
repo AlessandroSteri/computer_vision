@@ -1,6 +1,8 @@
 import argparse
 from gte.model import GroundedTextualEntailmentModel
 from gte.utils.log import id_gen
+from gte.info import MAX_LEN_P, MAX_LEN_H
+
 
 def main():
     ### CLI args ###{{{
@@ -11,7 +13,9 @@ def main():
     cmdLineParser.add_argument("step_check", type=int, help="Every how many iteration check accuracy over dev sets.")
     cmdLineParser.add_argument("--gpu", dest="use_gpu", action='store_true', help="Enable gpu accelaration.")
     cmdLineParser.add_argument("--dev_env", dest="dev_env", action='store_true', help="Development Environment: Use always the same seed, experiments are repeatable.")
-
+    cmdLineParser.add_argument('--max_len_p', action="store", dest="max_len_p", default=MAX_LEN_P, type=int, help="Max lenght for premises.")
+    cmdLineParser.add_argument('--max_len_h', action="store", dest="max_len_h", default=MAX_LEN_H, type=int, help="Max lenght for hypothesis.")
+    cmdLineParser.add_argument("--trainable", dest="trainable", action='store_true', help="Makes trainable the pre-trained embeddigs.")
     options = cmdLineParser.parse_args()
 
     env = ''

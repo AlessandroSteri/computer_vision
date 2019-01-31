@@ -1,5 +1,6 @@
 # ignore datatset
 DATA/*
+log/*
 # glove
 glove/*
 
