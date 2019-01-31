@@ -1,5 +1,7 @@
 # ignore datatset
 DATA/*
+# glove
+glove/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
