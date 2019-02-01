@@ -9,13 +9,14 @@ class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
     def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label):
         self.options = options
-        self.graph = self.create_graph()
         self.ID = ID
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         self.embeddings = embeddings
         self.word2id = word2id
         self.id2word = id2word
         self.label2id = label2id
         self.id2label = id2label
+        self.graph = self.create_graph()
 
     def create_graph(self):
         print('Creating graph...')
@@ -41,6 +42,8 @@ class GroundedTextualEntailmentModel(object):
             #...
             self.prediction_layer()
 
+            self.opt_loss_layer()
+
             # TODO uncomment the saver once the model is implemented
             # creates the saver
             # self.saver = tf.train.Saver()
@@ -53,12 +56,13 @@ class GroundedTextualEntailmentModel(object):
             self.P = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P')  # shape [batch_size, max_len_p]
             self.H = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H')  # shape [batch_size, max_len_h]
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
-            self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.max_len_p], name='Lengths_P')  # shape [batch_size]
-            self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.max_len_h], name='Lengths_H')  # shape [batch_size]
+            self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
+            self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
 
 
     def embedding_layer(self):
         with tf.name_scope('EMBEDDINGS'):
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
             embeddings = tf.Variable(self.embeddings, dtype=tf.float32, trainable=self.options.trainable, name='embeddings')
 
             # selectors
@@ -67,51 +71,57 @@ class GroundedTextualEntailmentModel(object):
 
     def context_layer(self):
         with tf.name_scope('CONTEXT'):
-            self.context_p = bilstm_layer(self.P_lookup, self.options.max_len_p, self.options.hidden_size, name='BILSTM_P')
-            self.context_h = bilstm_layer(self.H_lookup, self.options.max_len_h, self.options.hidden_size, name='BILSTM_H')
+            import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
+            self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
-            context_p_flat = tf.reshape(self.context_p, [self.options.batch_size*self.options.max_len_p, self.options.hidden_size], name='context_p_flat') #shape (batch*step_p, hidden)
-            context_h_flat = tf.reshape(self.context_h, [self.options.batch_size*self.options.max_len_h, self.options.hidden_size], name='context_h_flat') #shape (batch*step_h, hidden)
+            pass
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            # context_p_flat = tf.reshape(self.context_p, [self.options.batch_size*self.options.max_len_p, 2*self.options.hidden_size], name='context_p_flat') #shape (batch*step_p, hidden)
+            # context_h_flat = tf.reshape(self.context_h, [self.options.batch_size*self.options.max_len_h, 2*self.options.hidden_size], name='context_h_flat') #shape (batch*step_h, hidden)
             #TODO check if one is the other transposed
-            self.match_P = tf.matmul(context_p_flat, tf.transpose(context_h_flat))
-            self.match_H = tf.matmul(context_h_flat, tf.transpose(context_p_flat))
+            # self.match_P = tf.matmul(context_p_flat, tf.transpose(context_h_flat)) #SHAPE [B*LP, B*LH]
+            # self.match_H = tf.matmul(context_h_flat, tf.transpose(context_p_flat)) #SHAPE [B*LH, B*LP]
 
     def aggregation_layer(self):
         with tf.name_scope('AGGREGATION'):
-            aggregate_p = bilstm_layer(self.match_P, self.options.max_len_p, self.options.hidden_size, name='BILSTM_AGGREGATE_P')
-            aggregate_h = bilstm_layer(self.match_H, self.options.max_len_h, self.options.hidden_size, name='BILSTM_AGGREGATE_H')
-            self.latent_repr = tf.concat([aggregate_p, tf.transpose(aggregate_h)], axis=-1, name='latent_repr')
+            aggregate_p = bilstm_layer(self.context_p, self.lengths_P, self.options.hidden_size, name='BILSTM_AGGREGATE_P')
+            aggregate_h = bilstm_layer(self.context_h, self.lengths_H, self.options.hidden_size, name='BILSTM_AGGREGATE_H')
+            # self.latent_repr = tf.concat([aggregate_p, tf.transpose(aggregate_h)], axis=-1, name='latent_repr')
+            self.latent_repr = tf.concat([aggregate_p, aggregate_h], axis=-2, name='latent_repr')
 
     def prediction_layer(self):
         with tf.name_scope('PREDICTION'):
-            match_dim = 2*self.options.batch_size*self.options.max_len_h #BLH
+            # match_dim = 2*self.options.batch_size*self.options.max_len_h #BLH
+            match_dim = 2*self.options.hidden_size
+            repr_flat = tf.reshape(self.latent_repr, [-1, 2*self.options.hidden_size], name='context_p_flat') #shape (batch*step_p, hidden)
             w_0 = tf.get_variable("w_0", [match_dim, match_dim/2], dtype=tf.float32)
             b_0 = tf.get_variable("b_0", [match_dim/2], dtype=tf.float32)
             w_1 = tf.get_variable("w_1", [match_dim/2, NUM_CLASSES],dtype=tf.float32)
             b_1 = tf.get_variable("b_1", [NUM_CLASSES],dtype=tf.float32)
 
-            logits = tf.matmul(self.latent_repr, w_0) + b_0
+            logits = tf.matmul(repr_flat, w_0) + b_0
             logits = tf.tanh(logits)
             # if is_training:
             #     logits = tf.nn.dropout(logits, (1 - dropout_rate))
             # else:
             #     logits = tf.multiply(logits, (1 - dropout_rate))
-            logits = tf.matmul(logits, w_1) + b_1
-            softmax_score = tf.nn.softmax(logits, name='softmax_score')
-            self.predict = tf.cast(tf.argmax(softmax_score, axis=-1), tf.int32, name='predict')
+            self.logits = tf.matmul(logits, w_1) + b_1
+            self.softmax_score = tf.nn.softmax(logits, name='softmax_score')
+            self.predict = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict')
 
     def opt_loss_layer(self):
         with tf.name_scope('loss'):
-            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels, name='unmasked_losses')
+            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=3, name='unmasked_losses')
             # mask = tf.sequence_mask(self.lengths_P, name='mask')
             # losses = tf.boolean_mask(losses, mask, name='masked_loss')
             # loss_mask = tf.sequence_mask(self.sequence_lengths, self.max_sentence_len, name='mask')
             # loss_mask = tf.reshape(loss_mask, (self.batch_size, self.max_sentence_len))
             # self.loss = tf.contrib.seq2seq.sequence_loss(score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
-            loss_mask = tf.reshape(losses, (self.batch_size, None, 3))
-            self.loss = tf.contrib.seq2seq.sequence_loss(score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
+            loss_mask = tf.reshape(losses, (self.options.batch_size, None, 3))
+            self.loss = tf.contrib.seq2seq.sequence_loss(self.softmax_score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
 
 
             # Add the loss value as a scalar to summary.
@@ -136,6 +146,8 @@ class GroundedTextualEntailmentModel(object):
                 epoch = _epoch + 1
                 print('Starting epoch: {}/{}'.format(epoch, num_epoch))
                 for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
+                    import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+
                     step += 1
                     run_metadata = tf.RunMetadata()
                     feed_dict_train = {

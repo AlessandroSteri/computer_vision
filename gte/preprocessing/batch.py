@@ -15,8 +15,8 @@ class Batch(object):
         self.P = self._map_sequences_id(P, lookup, max_len_p)
         self.H = self._map_sequences_id(H, lookup, max_len_h)
         self.labels = np.array([label2id[label] for label in labels])
-        self.lenghts_P = np.array([len(p) for p in P])
-        self.lenghts_H = np.array([len(h) for h in H])
+        self.lengths_P = np.array([len(p) for p in P])
+        self.lengths_H = np.array([len(h) for h in H])
         self.IDs = np.array(IDs)
 
         assert len(self.labels) == len(self.P)

@@ -18,7 +18,7 @@ def main(options, ID):
 
     gte_model = GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label)
     for session, step, epoch in gte_model.train(options.epoch):
-        #eval
+        # eval
         pass
 
 
@@ -34,6 +34,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument('--max_len_p', action="store", dest="max_len_p", default=MAX_LEN_P, type=int, help="Max lenght for premises.")
     cmdLineParser.add_argument('--max_len_h', action="store", dest="max_len_h", default=MAX_LEN_H, type=int, help="Max lenght for hypothesis.")
     cmdLineParser.add_argument("--trainable", dest="trainable", action='store_true', help="Makes trainable the pre-trained embeddigs.")
+    cmdLineParser.add_argument("hidden_size", type=int, help="Length of hidden layer.")
     options = cmdLineParser.parse_args()
 
     env = ''

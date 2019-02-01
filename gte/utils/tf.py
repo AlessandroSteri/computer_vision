@@ -16,6 +16,7 @@ def bilstm_layer(x, sequence_length, hidden_size, name=''):
     with tf.name_scope('bilstm_' + str(name)):
         cell_fw = tf.contrib.rnn.LSTMCell(hidden_size, name='cell_fw' + str(name))
         cell_bw = tf.contrib.rnn.LSTMCell(hidden_size, name='cell_bw' + str(name))
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         (out_fw, out_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, x, sequence_length=sequence_length, dtype=tf.float32)
         return tf.concat([out_fw, out_bw], axis=-1, name='latent_repr' + str(name))
 
