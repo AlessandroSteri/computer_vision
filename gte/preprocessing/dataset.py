@@ -46,8 +46,8 @@ def sentence_to_words(sentence):
 
 def words_to_dictionary(words, embedding_name, embedding_size):
     # dic, inv_dic = index_map(list(words), unk=UNK)
-    embedding, word_to_index, index_to_word = retrieve_embeddings(embedding_name, embedding_size, words)
-    return embedding, word_to_index, index_to_word
+    embeddings, word_to_index, index_to_word = retrieve_embeddings(embedding_name, embedding_size, words)
+    return embeddings, word_to_index, index_to_word
 
 # def datasets_to_index(datasets, word_to_index, use_only_token=True):
 

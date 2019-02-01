@@ -1,1 +1,1 @@
-time python3 main.py 2 16 0.1 1
+time python3 main.py 1 8 0.01 10

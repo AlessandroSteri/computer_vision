@@ -1,8 +1,9 @@
 import argparse
 from gte.model import GroundedTextualEntailmentModel
 from gte.utils.log import id_gen
+from gte.utils.dic import index_map
 from gte.info import MAX_LEN_P, MAX_LEN_H
-from gte.preprocessing.dataset import datasets_to_word_set
+from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary
 
 
 def main(options, ID):
@@ -12,11 +13,10 @@ def main(options, ID):
 
     embedding_name = 'glove'
     embedding_size = 50
-    embedding, word2id, id2word = words_to_dictionary(words, embedding_name, embedding_size)
+    embeddings, word2id, id2word = words_to_dictionary(words, embedding_name, embedding_size)
     label2id, id2label = index_map(list(labels))
-    batch_size = 32
 
-    gte_model = GroundedTextualEntailmentModel(options, ID)
+    gte_model = GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label)
     for session, step, epoch in gte_model.train(options.epoch):
         #eval
         pass

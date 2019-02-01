@@ -1,8 +1,8 @@
 import os
 import tensorflow as tf
 from tqdm import tqdm
-from gte.preprocessing.batch import generate_batch, iteration_per_epoch
-from gte.info import TB_DIR, MAX_LEN_P, MAX_LEN_H, NUM_CLASSES, DEV_DATA
+from gte.preprocessing.batch import generate_batch
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA
 from gte.utils.tf import bilstm_layer
 
 class GroundedTextualEntailmentModel(object):
