@@ -1,7 +1,7 @@
 import math
 import tensorflow as tf
 from tensorflow.python.keras import backend as K
-from as_srl.utils.lmd import identity
+from gte.utils.lmd import identity
 
 # in_size -> out_size
 def fully_connected_layer(x, in_size:int, out_size:int, activation=identity, name:str=''):

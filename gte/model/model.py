@@ -2,16 +2,20 @@ import os
 import tensorflow as tf
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch, iteration_per_epoch
-from gte.info import TB_DIR, MAX_LEN_P, MAX_LEN_H, NUM_CLASSES
+from gte.info import TB_DIR, MAX_LEN_P, MAX_LEN_H, NUM_CLASSES, DEV_DATA
 from gte.utils.tf import bilstm_layer
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
-    def __init__(self, options, ID, embeddings):
+    def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label):
         self.options = options
         self.graph = self.create_graph()
         self.ID = ID
         self.embeddings = embeddings
+        self.word2id = word2id
+        self.id2word = id2word
+        self.label2id = label2id
+        self.id2label = id2label
 
     def create_graph(self):
         print('Creating graph...')
@@ -30,6 +34,10 @@ class GroundedTextualEntailmentModel(object):
             self.embedding_layer()
             #...
             self.context_layer()
+
+            self.matching_layer()
+
+            self.aggregation_layer()
             #...
             self.prediction_layer()
 
@@ -45,6 +53,8 @@ class GroundedTextualEntailmentModel(object):
             self.P = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P')  # shape [batch_size, max_len_p]
             self.H = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H')  # shape [batch_size, max_len_h]
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
+            self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.max_len_p], name='Lengths_P')  # shape [batch_size]
+            self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.max_len_h], name='Lengths_H')  # shape [batch_size]
 
 
     def embedding_layer(self):
@@ -100,6 +110,7 @@ class GroundedTextualEntailmentModel(object):
             # loss_mask = tf.sequence_mask(self.sequence_lengths, self.max_sentence_len, name='mask')
             # loss_mask = tf.reshape(loss_mask, (self.batch_size, self.max_sentence_len))
             # self.loss = tf.contrib.seq2seq.sequence_loss(score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
+            loss_mask = tf.reshape(losses, (self.batch_size, None, 3))
             self.loss = tf.contrib.seq2seq.sequence_loss(score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
 
 
@@ -109,7 +120,7 @@ class GroundedTextualEntailmentModel(object):
 
 
         with tf.name_scope('optimizer'):
-            self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+            self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss)
 
 
     def train(self, num_epoch):
@@ -124,11 +135,17 @@ class GroundedTextualEntailmentModel(object):
             for _epoch in range(num_epoch):
                 epoch = _epoch + 1
                 print('Starting epoch: {}/{}'.format(epoch, num_epoch))
-                for iteration, batch in tqdm(enumerate(generate_batch(self.options.batch_size))):
+                for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
                     step += 1
                     run_metadata = tf.RunMetadata()
-                    feed_dict_train = {}
-                    loss, summary = session.run([],
+                    feed_dict_train = {
+                                        self.P: batch.P,
+                                        self.H: batch.H,
+                                        self.labels: batch.labels,
+                                        self.lengths_P: batch.lengths_P,
+                                        self.lengths_H: batch.lengths_H
+                    }
+                    _, loss, summary = session.run([self.optimizer, self.loss, self.train_summary],
                                                 feed_dict=feed_dict_train,
                                                 run_metadata=run_metadata)
                     # Add returned summaries to writer in each step, where
