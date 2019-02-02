@@ -1,14 +1,31 @@
+import os
+import random
 import csv
 from tqdm import tqdm
 from gte.info import TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD, UNK
 from gte.utils.dic import index_map
 from gte.emb.emb import retrieve_embeddings
+from gte.utils.path import mkdir
 
 LABEL = 0
 PREMISE_TOKEN = 1
 HYPOTHESIS_TOKENS = 2
 PREMISE = 4
 HYPOTHESIS = 5
+
+def generate_shuffled_datasets():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
+    shuffled_dir = './DATA/vsnli/SHUFFLED'
+    mkdir('./DATA/vsnli/SHUFFLED')
+    for filename in datasets:
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        lines = open(filename).readlines()
+        header = lines[0]
+        lines = lines[1:]
+        random.shuffle(lines)
+        name = os.path.basename(filename)
+        shuffled_file = os.path.join(shuffled_dir, name)
+        open(shuffled_file, 'w').writelines([header] + lines)
 
 def datasets_to_word_set(use_only_token=True):
     datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]

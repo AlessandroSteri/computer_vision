@@ -17,6 +17,8 @@ class GroundedTextualEntailmentModel(object):
         self.label2id = label2id
         self.id2label = id2label
         self.train_summary = []
+        self.eval_summary = []
+        self.test_summary = []
         self.graph = self.create_graph()
 
     def create_graph(self):
@@ -32,18 +34,14 @@ class GroundedTextualEntailmentModel(object):
                 tf.set_random_seed(1)
 
             self.input_layer()
-            #...
             self.embedding_layer()
-            #...
             self.context_layer()
-
             self.matching_layer()
-
             self.aggregation_layer()
-            #...
             self.prediction_layer()
-
             self.opt_loss_layer()
+
+            self.create_evaluation_graph()
 
             # TODO uncomment the saver once the model is implemented
             # creates the saver
@@ -81,40 +79,26 @@ class GroundedTextualEntailmentModel(object):
             self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
             self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
 
-            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
             W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
             b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
-            # W2 = tf.get_variable("w1", [self.options.batch_size, NUM_CLASSES], dtype=tf.float32)
-            # b2 = tf.get_variable("b1", [NUM_CLASSES], dtype=tf.float32)
             self.pred = tf.matmul(self.latent_repr_flat, W) + b
-            # self.pred = tf.matmul(self.pred, W2) + b2
-            # self.score = tf.reshape(self.pred, [-1, self.options.max_len_p + self.options.max_len_h, NUM_CLASSES])
             self.score = self.pred
             self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
             self.loss = tf.reduce_mean(self.losses)
             self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
-            self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
-            self.label_pred = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='label_pred')
             loss_summ = tf.summary.scalar('loss', self.loss)
             self.train_summary.append(loss_summ)
+
+            self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
+            self.label_pred = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='label_pred')
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
             pass
-            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-            # context_p_flat = tf.reshape(self.context_p, [self.options.batch_size*self.options.max_len_p, 2*self.options.hidden_size], name='context_p_flat') #shape (batch*step_p, hidden)
-            # context_h_flat = tf.reshape(self.context_h, [self.options.batch_size*self.options.max_len_h, 2*self.options.hidden_size], name='context_h_flat') #shape (batch*step_h, hidden)
-            #TODO check if one is the other transposed
-            # self.match_P = tf.matmul(context_p_flat, tf.transpose(context_h_flat)) #SHAPE [B*LP, B*LH]
-            # self.match_H = tf.matmul(context_h_flat, tf.transpose(context_p_flat)) #SHAPE [B*LH, B*LP]
 
     def aggregation_layer(self):
         with tf.name_scope('AGGREGATION'):
             pass
-            # aggregate_p = bilstm_layer(self.context_p, self.lengths_P, self.options.hidden_size, name='BILSTM_AGGREGATE_P')
-            # aggregate_h = bilstm_layer(self.context_h, self.lengths_H, self.options.hidden_size, name='BILSTM_AGGREGATE_H')
-            # self.latent_repr = tf.concat([aggregate_p, tf.transpose(aggregate_h)], axis=-1, name='latent_repr')
-            # self.latent_repr = tf.concat([aggregate_p, aggregate_h], axis=-2, name='latent_repr')
 
     def prediction_layer(self):
         pass
@@ -122,7 +106,89 @@ class GroundedTextualEntailmentModel(object):
     def opt_loss_layer(self):
         pass
 
+    def create_evaluation_graph(self):
+        with tf.name_scope('eval'):
+            self.precision = tf.placeholder(tf.float32, [])
+            self.recall = tf.placeholder(tf.float32, [])
+            self.f1 = tf.placeholder(tf.float32, [])
+            self.eval_summary.append(tf.summary.scalar('Precision', self.precision))
+            self.eval_summary.append(tf.summary.scalar('Recall', self.recall))
+            self.eval_summary.append(tf.summary.scalar('F1', self.f1))
 
+    def train(self, num_epoch):
+        print("Training for {} epochs.".format(num_epoch))
+        tensorboard_dir = os.path.join(TB_DIR, self.ID)
+        with tf.Session(graph=self.graph) as session:
+            self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
+            # init variables
+            session.run(tf.global_variables_initializer())
+            session.run(tf.local_variables_initializer())
+            step = -1
+            for _epoch in range(num_epoch):
+                epoch = _epoch + 1
+                print('Starting epoch: {}/{}'.format(epoch, num_epoch))
+                for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
+                    # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+
+                    step += 1
+                    run_metadata = tf.RunMetadata()
+                    train_summary = tf.summary.merge(self.train_summary)
+                    feed_dict_train = {self.P: batch.P,
+                                       self.H: batch.H,
+                                       self.labels: batch.labels,
+                                       self.lengths_P: batch.lengths_P,
+                                       self.lengths_H: batch.lengths_H}
+
+                    _, loss, predictions, summary = session.run([self.optimizer,
+                                                                 self.loss,
+                                                                 self.label_pred,
+                                                                 train_summary],
+                                                                feed_dict=feed_dict_train,
+                                                                run_metadata=run_metadata)
+                    batch_accuracy = sum(batch.labels == predictions)/self.options.batch_size
+                    print("BATCH ACCURACY: ", batch_accuracy)
+                    print('LABELS:', batch.labels)
+                    print('PREDIC:', predictions)
+
+                    # Add returned summaries to writer in each step, where
+                    self.writer.add_summary(summary, step)
+
+                    if step % self.options.step_check == 0:
+                        print("RunID:", self.ID)
+                        print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
+                        print("Loss: ", loss)
+                        print('--------------------------------')
+                        if step != 0:
+                            # give back control to callee to run evaluation
+                            yield session, step, epoch
+                            print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
+            self.writer.close()
+
+            # TODO uncomment once the model is implemented
+            # Save the model for checkpoints
+            # path = self.saver.save(session, os.path.join(tensorboard_dir, 'model.ckpt'))
+
+
+
+########
+
+    # def matching_layer(self):
+    #     with tf.name_scope('MATCHING'):
+    #         pass
+    #         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+    #         # context_p_flat = tf.reshape(self.context_p, [self.options.batch_size*self.options.max_len_p, 2*self.options.hidden_size], name='context_p_flat') #shape (batch*step_p, hidden)
+    #         # context_h_flat = tf.reshape(self.context_h, [self.options.batch_size*self.options.max_len_h, 2*self.options.hidden_size], name='context_h_flat') #shape (batch*step_h, hidden)
+    #         #TODO check if one is the other transposed
+    #         # self.match_P = tf.matmul(context_p_flat, tf.transpose(context_h_flat)) #SHAPE [B*LP, B*LH]
+    #         # self.match_H = tf.matmul(context_h_flat, tf.transpose(context_p_flat)) #SHAPE [B*LH, B*LP]
+    #
+    # def aggregation_layer(self):
+    #     with tf.name_scope('AGGREGATION'):
+    #         pass
+    #         # aggregate_p = bilstm_layer(self.context_p, self.lengths_P, self.options.hidden_size, name='BILSTM_AGGREGATE_P')
+    #         # aggregate_h = bilstm_layer(self.context_h, self.lengths_H, self.options.hidden_size, name='BILSTM_AGGREGATE_H')
+    #         # self.latent_repr = tf.concat([aggregate_p, tf.transpose(aggregate_h)], axis=-1, name='latent_repr')
+    #         # self.latent_repr = tf.concat([aggregate_p, aggregate_h], axis=-2, name='latent_repr')
 
     # def old_prediction_layer(self):
     #     with tf.name_scope('PREDICTION'):
@@ -161,50 +227,3 @@ class GroundedTextualEntailmentModel(object):
     #
     #     with tf.name_scope('optimizer'):
     #         self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss)
-
-
-    def train(self, num_epoch):
-        print("Training for {} epochs.".format(num_epoch))
-        tensorboard_dir = os.path.join(TB_DIR, self.ID)
-        with tf.Session(graph=self.graph) as session:
-            self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
-            # init variables
-            session.run(tf.global_variables_initializer())
-            session.run(tf.local_variables_initializer())
-            step = -1
-            for _epoch in range(num_epoch):
-                epoch = _epoch + 1
-                print('Starting epoch: {}/{}'.format(epoch, num_epoch))
-                for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
-                    # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-
-                    step += 1
-                    run_metadata = tf.RunMetadata()
-                    train_summary = tf.summary.merge(self.train_summary)
-                    feed_dict_train = {
-                                        self.P: batch.P,
-                                        self.H: batch.H,
-                                        self.labels: batch.labels,
-                                        self.lengths_P: batch.lengths_P,
-                                        self.lengths_H: batch.lengths_H
-                    }
-                    _, loss, summary = session.run([self.optimizer, self.loss, train_summary],
-                                                feed_dict=feed_dict_train,
-                                                run_metadata=run_metadata)
-                    # Add returned summaries to writer in each step, where
-                    self.writer.add_summary(summary, step)
-
-                    if step % self.options.step_check == 0:
-                        print("RunID:", self.ID)
-                        print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
-                        print("Loss: ", loss)
-                        print('--------------------------------')
-                        if step != 0:
-                            # give back control to callee to run evaluation
-                            yield session, step, epoch
-                            print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
-            self.writer.close()
-
-            # TODO uncomment once the model is implemented
-            # Save the model for checkpoints
-            # path = self.saver.save(session, os.path.join(tensorboard_dir, 'model.ckpt'))
