@@ -1,12 +1,15 @@
+import os
 import argparse
 from gte.model import GroundedTextualEntailmentModel
 from gte.utils.log import id_gen
 from gte.utils.dic import index_map
-from gte.info import MAX_LEN_P, MAX_LEN_H
-from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary
+from gte.info import MAX_LEN_P, MAX_LEN_H, SHUFFLED_DIR
+from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary, generate_shuffled_datasets
 
 
 def main(options, ID):
+    if not os.path.exists(SHUFFLED_DIR): generate_shuffled_datasets()
+
     words, labels, lens_p, lens_h = datasets_to_word_set()
     print("Words: ", len(words))
     print("Labels: ", labels)

@@ -3,10 +3,12 @@ HP_LOG = './log/log.txt'
 UNK = "<UNK>"
 
 #NON SHUFFLED, FOLLOWS PATTERN
-# TRAIN_DATA = './DATA/vsnli/VSNLI_1.0_train.tsv'
-# DEV_DATA = './DATA/vsnli/VSNLI_1.0_dev.tsv'
-# TEST_DATA = './DATA/vsnli/VSNLI_1.0_test.tsv'
-# TEST_DATA_HARD = './DATA/vsnli/VSNLI_1.0_test_hard.tsv'
+X_TRAIN_DATA = './DATA/vsnli/VSNLI_1.0_train.tsv'
+X_DEV_DATA = './DATA/vsnli/VSNLI_1.0_dev.tsv'
+X_TEST_DATA = './DATA/vsnli/VSNLI_1.0_test.tsv'
+X_TEST_DATA_HARD = './DATA/vsnli/VSNLI_1.0_test_hard.tsv'
+
+SHUFFLED_DIR = './DATA/vsnli/SHUFFLED'
 
 TRAIN_DATA = './DATA/vsnli/SHUFFLED/VSNLI_1.0_train.tsv'
 DEV_DATA = './DATA/vsnli/SHUFFLED/VSNLI_1.0_dev.tsv'
