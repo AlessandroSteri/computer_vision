@@ -9,7 +9,7 @@ from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary,
 
 def main(options, ID):
     if not os.path.exists(SHUFFLED_DIR): generate_shuffled_datasets()
-
+    
     words, labels, lens_p, lens_h = datasets_to_word_set()
     print("Words: ", len(words))
     print("Labels: ", labels)

@@ -35,31 +35,38 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, max_len_p=MAX_LE
     with open(dataset_file) as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader, None) #skip header
-        P, H, labels, I, IDs = [], [], [], [], []
         last_batch = False
+        end_epoch = False
         while not last_batch:
-            while len(labels) < batch_size:
-                row = next(reader, None)
-                if row == None:
-                    #last batch is not complete
-                    reader = csv.reader(f, delimiter="\t")
-                    next(reader, None) #skip header
-                    last_batch = True
-                else:
-                    # batch_txt += [row]
-                    labels += [row[0].strip()]
-                    P   += [row[1].strip().split()]
-                    H   += [row[2].strip().split()]
-                    img  = row[3].strip().split("#")
-                    ID   = row[6].strip().split("#")[1]
-                    I   += [img]
-                    IDs += ID
-                    # non token not used
-                    # premise = row[4].strip()
-                    # hypothesis = row[5].strip()
-            #complete batch
-            batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H)
+            if end_epoch:
+                batch = None
+                end_epoch = False
+            else:
+                P, H, labels, I, IDs = [], [], [], [], []
+                while len(labels) < batch_size:
+                    row = next(reader, None)
+                    if row == None:
+                        #last batch is not complete
+                        reader = csv.reader(f, delimiter="\t")
+                        next(reader, None) #skip header
+                        last_batch = True
+                    else:
+                        # batch_txt += [row]
+                        labels += [row[0].strip()]
+                        P   += [row[1].strip().split()]
+                        H   += [row[2].strip().split()]
+                        img  = row[3].strip().split("#")
+                        ID   = row[6].strip().split("#")[1]
+                        I   += [img]
+                        IDs += ID
+                        # non token not used
+                        # premise = row[4].strip()
+                        # hypothesis = row[5].strip()
+                #complete batch
+                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H)
             yield batch
+            end_epoch = last_batch
+            last_batch = False
 
 def iteration_per_epoch(dataset_file, batch_size):
     with open(dataset_file) as f:

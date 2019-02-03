@@ -2,7 +2,7 @@ import os
 import tensorflow as tf
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA
 from gte.utils.tf import bilstm_layer
 
 class GroundedTextualEntailmentModel(object):
@@ -129,7 +129,9 @@ class GroundedTextualEntailmentModel(object):
                 print('Starting epoch: {}/{}'.format(epoch, num_epoch))
                 for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
                     # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-
+                    if batch == None:
+                        print("End of epoch.")
+                        break
                     step += 1
                     run_metadata = tf.RunMetadata()
                     train_summary = tf.summary.merge(self.train_summary)

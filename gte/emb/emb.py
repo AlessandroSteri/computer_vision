@@ -2,11 +2,9 @@ import os
 import numpy as np
 from gte.utils.dic import index_map
 from gte.utils.ser import serialize, deserialize, exists_serialized_obj
-from gte.utils.log import LogTime, id_gen
-from gte.utils.dic import index_map
+from gte.utils.log import LogTime
 import gensim
 from gensim.scripts.glove2word2vec import glove2word2vec
-import codecs
 from sys import platform
 
 
