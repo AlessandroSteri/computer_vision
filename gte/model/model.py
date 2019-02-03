@@ -1,6 +1,7 @@
 import os
 import tensorflow as tf
 import numpy as np
+from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA
@@ -44,9 +45,8 @@ class GroundedTextualEntailmentModel(object):
 
             self.create_evaluation_graph()
 
-            # TODO uncomment the saver once the model is implemented
             # creates the saver
-            # self.saver = tf.train.Saver()
+            self.saver = tf.train.Saver()
         print('Created graph!')
         return graph
 
@@ -109,11 +109,13 @@ class GroundedTextualEntailmentModel(object):
 
     def create_evaluation_graph(self):
         with tf.name_scope('eval'):
-            self.precision = tf.placeholder(tf.float32, [])
-            self.recall = tf.placeholder(tf.float32, [])
+            # self.precision = tf.placeholder(tf.float32, [])
+            # self.recall = tf.placeholder(tf.float32, [])
+            self.accuracy = tf.placeholder(tf.float32, [])
             self.f1 = tf.placeholder(tf.float32, [])
-            self.eval_summary.append(tf.summary.scalar('Precision', self.precision))
-            self.eval_summary.append(tf.summary.scalar('Recall', self.recall))
+            # self.eval_summary.append(tf.summary.scalar('Precision', self.precision))
+            # self.eval_summary.append(tf.summary.scalar('Recall', self.recall))
+            self.eval_summary.append(tf.summary.scalar('Accuracy', self.accuracy))
             self.eval_summary.append(tf.summary.scalar('F1', self.f1))
 
     # def eval_model(self, epoch, iteration, DATASET, session):
@@ -194,6 +196,17 @@ class GroundedTextualEntailmentModel(object):
                             assert len(labels) == len(eval_predictions)
                             accuracy = sum(labels == eval_predictions)/len(labels)
                             print("Accuracy: {}".format(accuracy))
+                            F1 = f1_score(labels, eval_predictions, average='micro')
+                            print("F1: {}".format(F1))
+
+                            feed_dictionary = {self.accuracy: accuracy,
+                                               self.f1: F1}
+
+                            eval_summary = tf.summary.merge(self.eval_summary)
+                            eval_summ = session.run(eval_summary,
+                                                    feed_dict=feed_dictionary)
+                            # use num_iteration training for summary
+                            self.writer.add_summary(eval_summ, step)
                             yield session, step, epoch
                             # print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
             self.writer.close()
