@@ -40,13 +40,13 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, max_len_p=MAX_LE
         while not last_batch:
             if end_epoch:
                 batch = None
-                end_epoch = False
             else:
                 P, H, labels, I, IDs = [], [], [], [], []
                 while len(labels) < batch_size:
                     row = next(reader, None)
                     if row == None:
                         #last batch is not complete
+                        f.seek(0)
                         reader = csv.reader(f, delimiter="\t")
                         next(reader, None) #skip header
                         last_batch = True
