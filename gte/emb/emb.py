@@ -6,6 +6,9 @@ from gte.utils.log import LogTime, id_gen
 from gte.utils.dic import index_map
 import gensim
 from gensim.scripts.glove2word2vec import glove2word2vec
+import codecs
+from sys import platform
+
 
 def retrieve_embeddings(embedding_name, embedding_size, words_domain):
     lite_emb_caching_dir = os.path.join('log/embeddings/lite', embedding_name, str(embedding_size))
@@ -61,6 +64,8 @@ def get_glove_embeddings840(size):
             words.append(word)
             vectors.append(embedding)
     return words, vectors
+
+
 def get_glove_embeddings(size, b42=False):
     path = ''
     if size == 50:
@@ -73,9 +78,23 @@ def get_glove_embeddings(size, b42=False):
         path = 'glove/glove.6B.300d.txt'
     if size == 300 and b42:
         path = 'glove/glove.42B.300d.txt'
-    glove = np.loadtxt(path, dtype='str', comments=None)
-    words = glove[:, 0]
-    vectors = glove[:, 1:].astype('float')
+    #with codecs.open(path, encoding='latin-1') as f:
+    #    glove = np.loadtxt(f, dtype='str', comments=None)
+    if platform.startswith('linux'):
+        glove2word2vec(glove_input_file=path, word2vec_output_file="gensim_glove_vectors.txt")
+        from gensim.models.keyedvectors import KeyedVectors
+        glove_model = KeyedVectors.load_word2vec_format("gensim_glove_vectors.txt", binary=False)
+        vectors = np.zeros((len(glove_model.wv.vocab), size))
+        words = np.chararray((len(glove_model.wv.vocab)), unicode=True)
+        for i in range(len(glove_model.wv.vocab)):
+            embedding_vector = glove_model.wv[glove_model.wv.index2word[i]]
+            if embedding_vector is not None:
+                vectors[i] = embedding_vector
+                words[i] = glove_model.wv.index2word[i]
+    elif platform.startswith('darwin'):
+        glove = np.loadtxt(path, dtype='str', comments=None)
+        words = glove[:, 0]
+        vectors = glove[:, 1:].astype('float')    
     return words, vectors
 
 
