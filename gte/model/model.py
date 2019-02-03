@@ -1,5 +1,6 @@
 import os
 import tensorflow as tf
+import numpy as np
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA
@@ -90,7 +91,7 @@ class GroundedTextualEntailmentModel(object):
             self.train_summary.append(loss_summ)
 
             self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
-            self.label_pred = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='label_pred')
+            self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -115,7 +116,33 @@ class GroundedTextualEntailmentModel(object):
             self.eval_summary.append(tf.summary.scalar('Recall', self.recall))
             self.eval_summary.append(tf.summary.scalar('F1', self.f1))
 
-    def train(self, num_epoch):
+    # def eval_model(self, epoch, iteration, DATASET, session):
+    #     print("Evaluate model: \nEpoch{} \nIteration{}.".format(epoch, iteration))
+    #     # eval_summary = tf.summary.merge(self.eval_summary)
+    #     pass
+
+    def predict(self, DATASET, session):
+        predictions, labels = [], []
+        for batch in tqdm(generate_batch(DATASET,
+                                         self.options.batch_size,
+                                         self.word2id,
+                                         self.label2id,
+                                         max_len_p=self.options.max_len_p,
+                                         max_len_h=self.options.max_len_h)):
+            if batch is None:
+                print("End of epoch.")
+                break
+            feed_dict_train = {self.P: batch.P,
+                               self.H: batch.H,
+                               self.lengths_P: batch.lengths_P,
+                               self.lengths_H: batch.lengths_H}
+            [p] = session.run([self.predict_op], feed_dict=feed_dict_train)
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            predictions += [_ for _ in p]
+            labels += [_ for _ in batch.labels]
+        return np.array(predictions), np.array(labels)
+
+    def train(self, num_epoch, evaluate=False, test=False):
         print("Training for {} epochs.".format(num_epoch))
         tensorboard_dir = os.path.join(TB_DIR, self.ID)
         with tf.Session(graph=self.graph) as session:
@@ -129,28 +156,29 @@ class GroundedTextualEntailmentModel(object):
                 print('Starting epoch: {}/{}'.format(epoch, num_epoch))
                 for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
                     # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-                    if batch == None:
-                        print("End of epoch.")
+                    if batch is None:
+                        print("End of eval.")
                         break
                     step += 1
                     run_metadata = tf.RunMetadata()
-                    train_summary = tf.summary.merge(self.train_summary)
+                    train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
                     feed_dict_train = {self.P: batch.P,
                                        self.H: batch.H,
                                        self.labels: batch.labels,
                                        self.lengths_P: batch.lengths_P,
                                        self.lengths_H: batch.lengths_H}
 
-                    _, loss, predictions, summary = session.run([self.optimizer,
-                                                                 self.loss,
-                                                                 self.label_pred,
-                                                                 train_summary],
-                                                                feed_dict=feed_dict_train,
-                                                                run_metadata=run_metadata)
-                    batch_accuracy = sum(batch.labels == predictions)/self.options.batch_size
-                    print("BATCH ACCURACY: ", batch_accuracy)
-                    print('LABELS:', batch.labels)
-                    print('PREDIC:', predictions)
+                    result = session.run([self.optimizer,
+                                          self.loss,
+                                          self.predict_op,
+                                          train_summary],
+                                         feed_dict=feed_dict_train,
+                                         run_metadata=run_metadata)
+                    _, loss, predictions, summary = result
+                    # batch_accuracy = sum(batch.labels == predictions)/self.options.batch_size
+                    # print("BATCH ACCURACY: ", batch_accuracy)
+                    # print('LABELS:', batch.labels)
+                    # print('PREDIC:', predictions)
 
                     # Add returned summaries to writer in each step, where
                     self.writer.add_summary(summary, step)
@@ -162,8 +190,12 @@ class GroundedTextualEntailmentModel(object):
                         print('--------------------------------')
                         if step != 0:
                             # give back control to callee to run evaluation
+                            eval_predictions, labels = self.predict(DEV_DATA, session)
+                            assert len(labels) == len(eval_predictions)
+                            accuracy = sum(labels == eval_predictions)/len(labels)
+                            print("Accuracy: {}".format(accuracy))
                             yield session, step, epoch
-                            print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
+                            # print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
             self.writer.close()
 
             # TODO uncomment once the model is implemented
