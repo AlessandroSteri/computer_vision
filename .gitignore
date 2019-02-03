@@ -3,6 +3,7 @@ DATA/*
 log/*
 # glove
 glove/*
+gensim_glove_vectors.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -78,8 +78,6 @@ def get_glove_embeddings(size, b42=False):
         path = 'glove/glove.6B.300d.txt'
     if size == 300 and b42:
         path = 'glove/glove.42B.300d.txt'
-    #with codecs.open(path, encoding='latin-1') as f:
-    #    glove = np.loadtxt(f, dtype='str', comments=None)
     if platform.startswith('linux'):
         glove2word2vec(glove_input_file=path, word2vec_output_file="gensim_glove_vectors.txt")
         from gensim.models.keyedvectors import KeyedVectors
