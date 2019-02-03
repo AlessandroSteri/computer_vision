@@ -127,7 +127,7 @@ class GroundedTextualEntailmentModel(object):
             for _epoch in range(num_epoch):
                 epoch = _epoch + 1
                 print('Starting epoch: {}/{}'.format(epoch, num_epoch))
-                for iteration, batch in tqdm(enumerate(generate_batch(DEV_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
+                for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
                     # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                     if batch == None:
                         print("End of epoch.")
