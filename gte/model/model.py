@@ -33,13 +33,14 @@ class GroundedTextualEntailmentModel(object):
         if self.session is not None:
             self.session.close()
 
-    def get_session(self, graph):
+    def get_session(self):
         if self.session is None:
             self.session = tf.Session()
         return self.session
 
     def restore_session(self, model_ckpt):
-        pass
+        self.saver.restore(self.session, model_ckpt)
+        print("Model restored from {}.".format(model_ckpt))
 
     def get_best_f1(self):
         if not os.path.exists(BEST_F1): return 0.50
