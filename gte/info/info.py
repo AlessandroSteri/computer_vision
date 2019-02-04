@@ -2,7 +2,7 @@ TB_DIR = './log/tensorboard'
 HP_LOG = './log/log.txt'
 UNK = "<UNK>"
 
-#NON SHUFFLED, FOLLOWS PATTERN
+# NON SHUFFLED, FOLLOWS PATTERN
 X_TRAIN_DATA = './DATA/vsnli/VSNLI_1.0_train.tsv'
 X_DEV_DATA = './DATA/vsnli/VSNLI_1.0_dev.tsv'
 X_TEST_DATA = './DATA/vsnli/VSNLI_1.0_test.tsv'
@@ -26,3 +26,6 @@ PAD = 0
 
 NUM_CLASSES = 3
 
+EPS = 1e-6
+
+NUM_IMG_FEATS = 49
