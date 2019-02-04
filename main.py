@@ -5,6 +5,7 @@ from gte.utils.log import id_gen
 from gte.utils.dic import index_map
 from gte.info import MAX_LEN_P, MAX_LEN_H, SHUFFLED_DIR
 from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary, generate_shuffled_datasets
+from gte.images import Image2vec
 
 
 def main(options, ID):
@@ -18,6 +19,8 @@ def main(options, ID):
     embedding_size = 50
     embeddings, word2id, id2word = words_to_dictionary(words, embedding_name, embedding_size)
     label2id, id2label = index_map(list(labels))
+
+    image2vec = Image2vec(has_model=True)
 
     # gte_model = GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label)
     with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label) as gte_model:

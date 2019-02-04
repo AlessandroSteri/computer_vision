@@ -14,8 +14,8 @@ TRAIN_DATA = './DATA/vsnli/SHUFFLED/VSNLI_1.0_train.tsv'
 DEV_DATA = './DATA/vsnli/SHUFFLED/VSNLI_1.0_dev.tsv'
 TEST_DATA = './DATA/vsnli/SHUFFLED/VSNLI_1.0_test.tsv'
 TEST_DATA_HARD = './DATA/vsnli/SHUFFLED/VSNLI_1.0_test_hard.tsv'
-IMG_DATA = './DATA/flicker30k_images'
-IMG_FEATS = './DATA/flicker30k_images/features'
+IMG_DATA = './DATA/flickr30k_images'
+IMG_FEATS = './DATA/flickr30k_images/features'
 
 BEST_F1 = './log/f1.txt'
 
