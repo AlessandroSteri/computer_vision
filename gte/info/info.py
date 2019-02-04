@@ -17,6 +17,8 @@ TEST_DATA_HARD = './DATA/vsnli/SHUFFLED/VSNLI_1.0_test_hard.tsv'
 IMG_DATA = './DATA/flicker30k_images'
 IMG_FEATS = './DATA/flicker30k_images/features'
 
+BEST_F1 = './log/f1.txt'
+
 MAX_LEN_P = 82
 MAX_LEN_H = 62
 

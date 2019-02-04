@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1
 from gte.utils.tf import bilstm_layer
 
 class GroundedTextualEntailmentModel(object):
@@ -22,6 +22,33 @@ class GroundedTextualEntailmentModel(object):
         self.eval_summary = []
         self.test_summary = []
         self.graph = self.create_graph()
+        self.session = tf.Session()
+        self.best_f1 = self.get_best_f1()
+
+    def __enter__(self):
+        # self.session = tf.Session()
+        return self
+
+    def __exit__(self, exc_type, exc_val, traceback):
+        if self.session is not None:
+            self.session.close()
+
+    def get_session(self, graph):
+        if self.session is None:
+            self.session = tf.Session()
+        return self.session
+
+    def restore_session(self, model_ckpt):
+        pass
+
+    def get_best_f1(self):
+        if not os.path.exists(BEST_F1): return 0.50
+        with open(BEST_F1, 'r') as f:
+            return float(f.readline())
+
+    def store_best_f1(self, f1):
+        with open(BEST_F1, 'w') as f:
+            f.write('{}'.format(f1))
 
     def create_graph(self):
         print('Creating graph...')
@@ -30,25 +57,25 @@ class GroundedTextualEntailmentModel(object):
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
         ### MODEL DEFINITION ###
-        graph = tf.Graph()
-        with graph.as_default():
-            if self.options.dev_env:
-                tf.set_random_seed(1)
+        # graph = tf.Graph()
+        # with graph.as_default():
+        if self.options.dev_env:
+            tf.set_random_seed(1)
 
-            self.input_layer()
-            self.embedding_layer()
-            self.context_layer()
-            self.matching_layer()
-            self.aggregation_layer()
-            self.prediction_layer()
-            self.opt_loss_layer()
+        self.input_layer()
+        self.embedding_layer()
+        self.context_layer()
+        self.matching_layer()
+        self.aggregation_layer()
+        self.prediction_layer()
+        self.opt_loss_layer()
 
-            self.create_evaluation_graph()
+        self.create_evaluation_graph()
 
-            # creates the saver
-            self.saver = tf.train.Saver()
+        # creates the saver
+        self.saver = tf.train.Saver()
         print('Created graph!')
-        return graph
+        # return graph
 
     def input_layer(self):
         # Define input data tensors.
@@ -123,7 +150,7 @@ class GroundedTextualEntailmentModel(object):
     #     # eval_summary = tf.summary.merge(self.eval_summary)
     #     pass
 
-    def predict(self, DATASET, session):
+    def predict(self, DATASET):
         predictions, labels = [], []
         for batch in tqdm(generate_batch(DATASET,
                                          self.options.batch_size,
@@ -131,89 +158,86 @@ class GroundedTextualEntailmentModel(object):
                                          self.label2id,
                                          max_len_p=self.options.max_len_p,
                                          max_len_h=self.options.max_len_h)):
-            if batch is None:
-                print("End of epoch.")
-                break
+            if batch is None: break
             feed_dict_train = {self.P: batch.P,
                                self.H: batch.H,
                                self.lengths_P: batch.lengths_P,
                                self.lengths_H: batch.lengths_H}
-            [p] = session.run([self.predict_op], feed_dict=feed_dict_train)
-            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            [p] = self.session.run([self.predict_op], feed_dict=feed_dict_train)
             predictions += [_ for _ in p]
             labels += [_ for _ in batch.labels]
+
         return np.array(predictions), np.array(labels)
 
-    def train(self, num_epoch, evaluate=False, test=False):
-        print("Training for {} epochs.".format(num_epoch))
+    def fit(self, evaluate=False, test=False):
+        print("RunID: {}".format(self.ID))
         tensorboard_dir = os.path.join(TB_DIR, self.ID)
-        with tf.Session(graph=self.graph) as session:
-            self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
-            # init variables
-            session.run(tf.global_variables_initializer())
-            session.run(tf.local_variables_initializer())
-            step = -1
-            for _epoch in range(num_epoch):
-                epoch = _epoch + 1
-                print('Starting epoch: {}/{}'.format(epoch, num_epoch))
-                for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
-                    # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-                    if batch is None:
-                        print("End of eval.")
-                        break
-                    step += 1
-                    run_metadata = tf.RunMetadata()
-                    train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
-                    feed_dict_train = {self.P: batch.P,
-                                       self.H: batch.H,
-                                       self.labels: batch.labels,
-                                       self.lengths_P: batch.lengths_P,
-                                       self.lengths_H: batch.lengths_H}
+        # with tf.Session() as session:
+        session = self.session
+        self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
+        # init variables
+        session.run(tf.global_variables_initializer())
+        session.run(tf.local_variables_initializer())
+        step = -1
+        for _epoch in range(self.options.epoch):
+            epoch = _epoch + 1
+            print('Starting epoch: {}/{}'.format(epoch, self.options.epoch))
+            for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
+                # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+                if batch is None:
+                    print("End of eval.")
+                    break
+                step += 1
+                run_metadata = tf.RunMetadata()
+                train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
+                feed_dict_train = {self.P: batch.P,
+                                   self.H: batch.H,
+                                   self.labels: batch.labels,
+                                   self.lengths_P: batch.lengths_P,
+                                   self.lengths_H: batch.lengths_H}
 
-                    result = session.run([self.optimizer,
-                                          self.loss,
-                                          self.predict_op,
-                                          train_summary],
-                                         feed_dict=feed_dict_train,
-                                         run_metadata=run_metadata)
-                    _, loss, predictions, summary = result
-                    # batch_accuracy = sum(batch.labels == predictions)/self.options.batch_size
-                    # print("BATCH ACCURACY: ", batch_accuracy)
-                    # print('LABELS:', batch.labels)
-                    # print('PREDIC:', predictions)
+                result = session.run([self.optimizer,
+                                      self.loss,
+                                      self.predict_op,
+                                      train_summary],
+                                     feed_dict=feed_dict_train,
+                                     run_metadata=run_metadata)
+                _, loss, predictions, summary = result
 
-                    # Add returned summaries to writer in each step, where
-                    self.writer.add_summary(summary, step)
+                # Add returned summaries to writer in each step, where
+                self.writer.add_summary(summary, step)
 
-                    if step % self.options.step_check == 0:
-                        print("RunID:", self.ID)
-                        print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
-                        print("Loss: ", loss)
-                        print('--------------------------------')
-                        if step != 0:
-                            # give back control to callee to run evaluation
-                            eval_predictions, labels = self.predict(DEV_DATA, session)
-                            assert len(labels) == len(eval_predictions)
-                            accuracy = sum(labels == eval_predictions)/len(labels)
-                            print("Accuracy: {}".format(accuracy))
-                            F1 = f1_score(labels, eval_predictions, average='micro')
-                            print("F1: {}".format(F1))
+                if step % self.options.step_check == 0:
+                    print("RunID:", self.ID)
+                    print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
+                    print("Loss: ", loss)
+                    print('--------------------------------')
+                    if step != 0:
+                        # give back control to callee to run evaluation
+                        eval_predictions, labels = self.predict(DEV_DATA)
+                        assert len(labels) == len(eval_predictions)
+                        accuracy = sum(labels == eval_predictions)/len(labels)
+                        print("Accuracy: {}".format(accuracy))
+                        f1 = f1_score(labels, eval_predictions, average='micro')
+                        print("F1: {}".format(f1))
 
-                            feed_dictionary = {self.accuracy: accuracy,
-                                               self.f1: F1}
+                        delta = 1.1
+                        if f1 >= self.best_f1 * delta:
+                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
+                            self.store_best_f1(f1)
 
-                            eval_summary = tf.summary.merge(self.eval_summary)
-                            eval_summ = session.run(eval_summary,
-                                                    feed_dict=feed_dictionary)
-                            # use num_iteration training for summary
-                            self.writer.add_summary(eval_summ, step)
-                            yield session, step, epoch
-                            # print('ith-Epoch: {}/{}'.format(epoch, num_epoch))
-            self.writer.close()
+                        feed_dictionary = {self.accuracy: accuracy,
+                                           self.f1: f1}
 
-            # TODO uncomment once the model is implemented
-            # Save the model for checkpoints
-            # path = self.saver.save(session, os.path.join(tensorboard_dir, 'model.ckpt'))
+                        eval_summary = tf.summary.merge(self.eval_summary)
+                        eval_summ = session.run(eval_summary,
+                                                feed_dict=feed_dictionary)
+                        self.writer.add_summary(eval_summ, step)
+        self.writer.close()
+
+        # TODO uncomment once the model is implemented
+        # Save the model for checkpoints
+        # path = self.saver.save(session, os.path.join(tensorboard_dir, 'model.ckpt'))
 
 
 
