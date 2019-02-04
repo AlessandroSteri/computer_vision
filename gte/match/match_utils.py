@@ -251,7 +251,7 @@ def multi_highway_layer(in_val, output_size, num_layers, scope=None):
 def cal_max_premise_representation(premise_representation, cosine_matrix):
     # premise_representation: [batch_size, premise_len, dim]
     # cosine_matrix: [batch_size, hypothesis_len, premise_len]
-    premise_index = tf.arg_max(cosine_matrix, 2) # [batch_size, hypothesis_len]
+    premise_index = tf.argmax(cosine_matrix, 2) # [batch_size, hypothesis_len]
     def singel_instance(x):
         q = x[0]
         c = x[1]
