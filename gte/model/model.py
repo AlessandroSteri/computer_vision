@@ -40,7 +40,7 @@ class GroundedTextualEntailmentModel(object):
 
     def restore_session(self, model_ckpt):
         self.saver.restore(self.session, model_ckpt)
-        print("Model restored from {}.".format(model_ckpt))
+        print("[GTE][MODEL] Model restored from {}.".format(model_ckpt))
 
     def get_best_f1(self):
         if not os.path.exists(BEST_F1): return 0.50
@@ -52,7 +52,7 @@ class GroundedTextualEntailmentModel(object):
             f.write('{}'.format(f1))
 
     def create_graph(self):
-        print('Creating graph...')
+        print('[GTE][MODEL]Creating graph...')
         if not self.options.use_gpu:
             os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -67,15 +67,14 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
         self.matching_layer()
-        self.aggregation_layer()
+        # self.aggregation_layer()
         self.opt_loss_layer()
         self.prediction_layer()
 
         self.create_evaluation_graph()
 
-        # creates the saver
         self.saver = tf.train.Saver()
-        print('Created graph!')
+        print('[GTE][MODEL] Created graph!')
         # return graph
 
     def input_layer(self):
@@ -86,7 +85,6 @@ class GroundedTextualEntailmentModel(object):
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
-
 
     def embedding_layer(self):
         with tf.name_scope('EMBEDDINGS'):
@@ -105,30 +103,6 @@ class GroundedTextualEntailmentModel(object):
             L_h = self.options.max_len_h
             self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
             self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
-
-    def opt_loss_layer(self):
-        with tf.name_scope('OPT_LOSS'):
-            W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
-            b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
-
-            # self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
-            # self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
-
-            # W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
-            # b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
-
-            self.pred = tf.matmul(self.match_logits, W_match) + b_match
-            self.score = self.pred
-            self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
-            self.loss = tf.reduce_mean(self.losses)
-            self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
-            loss_summ = tf.summary.scalar('loss', self.loss)
-            self.train_summary.append(loss_summ)
-
-    def prediction_layer(self):
-        with tf.name_scope('PREDICTION'):
-            self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
-            self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -223,12 +197,33 @@ class GroundedTextualEntailmentModel(object):
             logits = tf.matmul(self.match_representation, w_0) + b_0
             self.match_logits = tf.tanh(logits)
 
+    def opt_loss_layer(self):
+        with tf.name_scope('OPT_LOSS'):
+            W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
+            b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
 
+            # self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
+            # self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
+
+            # W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
+            # b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
+
+            self.pred = tf.matmul(self.match_logits, W_match) + b_match
+            self.score = self.pred
+            self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
+            self.loss = tf.reduce_mean(self.losses)
+            self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
+            loss_summ = tf.summary.scalar('loss', self.loss)
+            self.train_summary.append(loss_summ)
+
+    def prediction_layer(self):
+        with tf.name_scope('PREDICTION'):
+            self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
+            self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
 
     def aggregation_layer(self):
         with tf.name_scope('AGGREGATION'):
             pass
-
 
     def create_evaluation_graph(self):
         with tf.name_scope('eval'):
@@ -240,11 +235,6 @@ class GroundedTextualEntailmentModel(object):
             # self.eval_summary.append(tf.summary.scalar('Recall', self.recall))
             self.eval_summary.append(tf.summary.scalar('Accuracy', self.accuracy))
             self.eval_summary.append(tf.summary.scalar('F1', self.f1))
-
-    # def eval_model(self, epoch, iteration, DATASET, session):
-    #     print("Evaluate model: \nEpoch{} \nIteration{}.".format(epoch, iteration))
-    #     # eval_summary = tf.summary.merge(self.eval_summary)
-    #     pass
 
     def predict(self, DATASET):
         predictions, labels = [], []
