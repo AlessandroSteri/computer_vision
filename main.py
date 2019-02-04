@@ -20,7 +20,8 @@ def main(options, ID):
     embeddings, word2id, id2word = words_to_dictionary(words, embedding_name, embedding_size)
     label2id, id2label = index_map(list(labels))
 
-    # image2vec = Image2vec(has_model=True)
+    image2vec = Image2vec(has_model=True)
+    image2vec.compute_all_feats_and_store()
 
     # gte_model = GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label)
     with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label) as gte_model:

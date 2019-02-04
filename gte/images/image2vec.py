@@ -14,7 +14,7 @@ class Image2vec(object):
         self.image_feats = np.array([])
         self.ids = None
         if os.path.exists(IMG_FEATS):
-            self._load()
+            self._load_with_pickle()
         if not os.path.exists(IMG_FEATS) or has_model:
             vgg_full_model = VGG16(weights='imagenet')
             #We don't need the prediction layer
@@ -52,11 +52,13 @@ class Image2vec(object):
         bar = tqdm(range(len(img_files)))
         for img_index in bar:
             img = img_files[img_index]
-            if not (img.startswith(".") or os.path.isdir(img)):
+            if not (img.startswith(".") or os.path.isdir(img)) and img.endswith("jpg"):
                 self.get_features(img)
                 #self._compute_features(img)
         with open(IMG_FEATS + "/all.pickle", "wb") as f:
             pickle.dump(self.image_feats, f)
+        with open(IMG_FEATS + "/ids.pickle", "wb") as f:
+            pickle.dump(self.ids, f)
         
     def _lookup(self, img_id):
         indexes = np.where(self.ids == img_id)[0]
@@ -81,3 +83,9 @@ class Image2vec(object):
             else:
                 self.image_feats = np.vstack((self.image_feats, features))
                 self.ids = np.vstack((self.ids, [img_name]))
+
+    def _load_with_pickle(self):
+        with open(IMG_FEATS + "/all.pickle", "rb") as f:
+            self.image_feats = pickle.load(f)
+        with open(IMG_FEATS + "/ids.pickle", "rb") as f:
+            self.ids = pickle.load(f)
