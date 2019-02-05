@@ -110,8 +110,9 @@ class GroundedTextualEntailmentModel(object):
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
-            self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32) # [batch_size, max_len_p]
-            self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32) # [batch_size, max_len_h]
+            self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32, name='P_mask')  # [batch_size, max_len_p]
+            self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32, name='H_mask')  # [batch_size, max_len_h]
+            self.I_mask = tf.sequence_mask([NUM_FEATS for _ in self.options.batch_size], NUM_FEATS, dtype=tf.float32, name='I_mask')  # [batch_size, NUM_FEATS]
             # ========Bilateral Matching=====
             out_image_feats = None
             in_question_repres = self.context_p
@@ -229,6 +230,74 @@ class GroundedTextualEntailmentModel(object):
 
                 b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
 
+
+                ##########################
+
+        #     context_rep_flat = tf.reshape(self.latent_repr, [self.batch_size*self.max_sentence_len, -1], name='context_rep_flat') #shape (batch*step, 2*hidden)
+        #
+        #     #PREDICATE
+        #     if concat_predicate:
+        #         pred_idxs = tf.where(tf.equal(self.predicate_flags, 1))[:,1] # shape batch, 1 -> for each sentence i pred_idxs[i] is the index of the predicate in use for that sentence
+        #         pred_idxs = tf.to_int32(pred_idxs)
+        #         # assert pred_idxs.shape == [self.batch_size]
+        #         idx_flat_offset = tf.constant([i for i in range(self.batch_size)]) * self.max_sentence_len #offset for index in flat batch representation
+        #         pred_idxs = pred_idxs + idx_flat_offset
+        #         pred_idxs = tf.reshape(pred_idxs, [self.batch_size, 1])
+        #         # assert pred_idxs.shape == [self.batch_size,1]
+        #         pred_idxs = tf.tile(pred_idxs, [1, self.max_sentence_len]) # replicate index for each word in sentence
+        #         pred_idxs = tf.reshape(pred_idxs, [self.batch_size*self.max_sentence_len]) #undo previus reshape
+        #         pred_hidd_repr_flat = tf.nn.embedding_lookup(context_rep_flat, pred_idxs, name='pred_hidd_repr_flat')  # shape (batch_size*max_len_sentence_batch, 2*hidden_size)
+        #
+        #         #concat predicate to form new context representation
+        #         context_rep_flat = tf.concat([context_rep_flat, pred_hidd_repr_flat], axis=-1, name='context_rep_flat_pred')
+        #         # attentive post predicate concatenation, slows down to much
+        #         # if attentive:
+        #         #     context_rep_flat_shape = tf.shape(context_rep_flat) # store old shape
+        #         #     context_repr_unflat = tf.reshape(context_rep_flat, shape=(self.batch_size, self.max_sentence_len, -1))
+        #         #     current_hidden = context_repr_unflat.shape[-1].value
+        #         #     attention_output, att = attention_layer(context_repr_unflat, self.sequence_lengths, self.batch_size, self.max_sentence_len, current_hidden, name='pred')
+        #         #     context_repr_unflat = tf.concat([attention_output, context_repr_unflat], -1)
+        #         #     context_rep_flat = tf.reshape(context_repr_unflat, shape=(self.batch_size*self.max_sentence_len, -1)) #restore shape
+        #     #END PRED
+        #
+        #     current_hidden = context_rep_flat.shape[-1].value
+        #     W = tf.Variable(tf.truncated_normal([current_hidden, self.out_space_size], stddev=1.0 / math.sqrt(self.out_space_size)))
+        #     b  = tf.Variable(tf.zeros([self.out_space_size]))
+        #     pred = tf.matmul(context_rep_flat, W) + b # (batch*step, self.out_space_size)
+        #
+        #     if self.options.dropout:
+        #         self.keep_probability = tf.placeholder(tf.float32, shape=[], name='un_dropout_rate')
+        #         pred = tf.nn.dropout(pred, self.keep_probability)
+        #     if self.options.relu:
+        #         pred = tf.nn.relu(pred, name='relu_pred')
+        #
+        #     longest_sentence_in_use = tf.shape(self.latent_repr)[1]
+        #     score = tf.reshape(pred, [-1, longest_sentence_in_use, self.out_space_size], name='score') #shape batch, step, self.out_space_size)
+        #
+        # with tf.name_scope('loss'):
+        #     softmax_score = tf.nn.softmax(score, name='softmax_score')
+        #     losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=score, labels=self.labels, name='unmasked_losses')
+        #     mask = tf.sequence_mask(self.sequence_lengths, name='mask')
+        #     losses = tf.boolean_mask(losses, mask, name='masked_loss')
+        #     loss_mask = tf.sequence_mask(self.sequence_lengths, self.max_sentence_len, name='mask')
+        #     loss_mask = tf.reshape(loss_mask, (self.batch_size, self.max_sentence_len))
+        #     self.loss = tf.contrib.seq2seq.sequence_loss(score, self.labels, tf.cast(loss_mask, tf.float32), name='loss')
+        #
+        #
+        #     # Add the loss value as a scalar to summary.
+        #     loss_summ = tf.summary.scalar('loss', self.loss)
+        #     self.train_summary.append(loss_summ)
+        #
+        #
+        # with tf.name_scope('optimizer'):
+        #     self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+        #
+        #
+        # with tf.name_scope('prediction'):
+        #     # batch * max_len_sentence_batch
+        #     self.predict_op = tf.cast(tf.argmax(softmax_score, axis=-1), tf.int32, name='predict_op')
+        #
+        #         ##########################
 
                 # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
                 # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
