@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
-from gte.utils.tf import bilstm_layer
+from gte.utils.tf import bilstm_layer, highway
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
 
@@ -110,8 +110,8 @@ class GroundedTextualEntailmentModel(object):
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
-            P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32) # [batch_size, max_len_p]
-            H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32) # [batch_size, max_len_h]
+            self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32) # [batch_size, max_len_p]
+            self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32) # [batch_size, max_len_h]
             # ========Bilateral Matching=====
             out_image_feats = None
             in_question_repres = self.context_p
@@ -120,8 +120,8 @@ class GroundedTextualEntailmentModel(object):
             in_passage_dep_cons = None
             self.question_lengths = self.lengths_P
             self.passage_lengths = self.lengths_H
-            question_mask = P_mask
-            mask = H_mask
+            question_mask = self.P_mask
+            mask = self.H_mask
             MP_dim = 10
             input_dim = 2*self.options.hidden_size
             with_filter_layer = False
@@ -212,12 +212,14 @@ class GroundedTextualEntailmentModel(object):
                 L_h = self.options.max_len_h
                 self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
                 if self.options.with_img:
+                    self.latent_repr = highway(self.latent_repr, HH, tf.nn.relu)
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
                     W_img = tf.get_variable("w_img", [HH, FEAT_SIZE], dtype=tf.float32)
                     b_img = tf.get_variable("b_img", [FEAT_SIZE], dtype=tf.float32)
                     self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_img) + b_img
                     self.latent_repr = tf.reshape(self.latent_repr_flat, [B, (L_p + L_h), FEAT_SIZE], name='ciaociao')
                     self.latent_repr = tf.concat([self.latent_repr, self.I], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
                     W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
@@ -235,6 +237,7 @@ class GroundedTextualEntailmentModel(object):
                 self.pred = tf.matmul(self.latent_repr_flat, W) + b
 
                 self.score = self.pred
+
                 self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
                 self.loss = tf.reduce_mean(self.losses)
                 self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES

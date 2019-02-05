@@ -21,7 +21,7 @@ class Image2vec(object):
             self.vgg = Model(input=vgg_full_model.input, output=vgg_full_model.get_layer('block5_pool').output)
 
     def get_features(self, img_id):
-        feats = self._lookup(img_id[:-4])
+        feats = self._lookup(img_id)
         if feats is not None:
             return feats
         return self._compute_features(img_id)
@@ -60,7 +60,7 @@ class Image2vec(object):
             pickle.dump(self.image_feats, f)
         with open(IMG_FEATS + "/ids.pickle", "wb") as f:
             pickle.dump(self.ids, f)
-        
+
     def _lookup(self, img_id):
         indexes = np.where(self.ids == img_id)[0]
         return self.image_feats[indexes[0]] if indexes.size > 0 else None
@@ -76,7 +76,7 @@ class Image2vec(object):
         bar = tqdm(range(len(feat_files)))
         for feat_index in bar:
             feat_file = feat_files[feat_index]
-            img_name = feat_file[:-4]
+            img_name = feat_file
             features = np.expand_dims(np.array(np.loadtxt(IMG_FEATS + "/" + feat_file)), axis=0)
             if self.image_feats.ndim == 1:
                 self.image_feats = features
