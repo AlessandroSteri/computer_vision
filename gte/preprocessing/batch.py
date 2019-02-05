@@ -36,6 +36,7 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, img2vec=None, ma
     with open(dataset_file) as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader, None) #skip header
+        
         last_batch = False
         end_epoch = False
         while not last_batch:

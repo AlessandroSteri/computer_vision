@@ -19,7 +19,6 @@ def main():
             pass
     ids = np.array(ids)
     assert len(ids) == num_img
-    import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
     image_feats = np.ones([len(ids), 49, 512])
     with open(IMG_FEATS + "/all.pickle", "wb") as f:
         pickle.dump(image_feats, f, protocol=pickle.HIGHEST_PROTOCOL)

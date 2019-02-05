@@ -43,7 +43,7 @@ class Image2vec(object):
         else:
             self.image_feats = np.vstack((self.image_feats, feats))
             self.ids = np.vstack((self.ids, [img_id]))
-        self._save(img_id, feats[0])
+        #self._save(img_id, feats[0])
         return feats[0]
 
     def compute_all_feats_and_store(self):
