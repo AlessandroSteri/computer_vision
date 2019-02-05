@@ -68,7 +68,7 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, img2vec=None, ma
                 if img2vec == None:
                     I = np.ones([batch_size, 49, 512], dtype=np.float32)
                 else:
-                    I = np.array([img2vec.get_feature(i) for i in I])
+                    I = np.array([img2vec.get_features(i[0]) for i in I])
                 batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h)
             yield batch
             end_epoch = last_batch

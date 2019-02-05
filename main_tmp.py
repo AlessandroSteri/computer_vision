@@ -15,7 +15,7 @@ def main():
         img = img_files[img_index]
         if not (img.startswith(".") or os.path.isdir(img)) and img.endswith("jpg"):
             num_img += 1
-            ids += [img]
+            ids += [img[:-4]]
             pass
     ids = np.array(ids)
     assert len(ids) == num_img

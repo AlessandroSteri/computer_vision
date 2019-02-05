@@ -22,11 +22,12 @@ class Image2vec(object):
 
     def get_features(self, img_id):
         feats = self._lookup(img_id[:-4])
-        if not feats == None:
+        if feats is not None:
             return feats
         return self._compute_features(img_id)
 
     def _compute_features(self, img_id):
+        print(img_id)
         from keras.preprocessing import image
         from gte.images.deep_learning_models.imagenet_utils import preprocess_input
         img = image.load_img(IMG_DATA + "/" + img_id, target_size=(224, 224)) #[224 x 224]
