@@ -18,7 +18,7 @@ class Batch(object):
         self.lengths_P = np.array([min(len(p), max_len_p) for p in P])
         self.lengths_H = np.array([min(len(h), max_len_h) for h in H])
         self.IDs = np.array(IDs)
-        self.I = np.ones([batch_size, 49, 512], dtype=np.float32)
+        self.I = I
 
         assert len(self.labels) == len(self.P)
         assert len(self.labels) == len(self.H)
@@ -31,7 +31,7 @@ class Batch(object):
 
 
 # use a generator
-def generate_batch(dataset_file, batch_size, word2id, label2id, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H):
+def generate_batch(dataset_file, batch_size, word2id, label2id, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H):
     # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
     with open(dataset_file) as f:
         reader = csv.reader(f, delimiter="\t")
@@ -64,6 +64,10 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, max_len_p=MAX_LE
                         # premise = row[4].strip()
                         # hypothesis = row[5].strip()
                 #complete batch
+                if img2vec == None:
+                    I = np.ones([batch_size, 49, 512], dtype=np.float32)
+                else:
+                    I = np.array([img2vec.get_feature(i) for i in I])
                 batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h)
             yield batch
             end_epoch = last_batch

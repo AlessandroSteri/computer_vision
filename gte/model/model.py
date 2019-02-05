@@ -8,6 +8,7 @@ from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
 from gte.utils.tf import bilstm_layer
 from gte.match.match_utils import bilateral_match_func
+from gte.images.image2vec import Image2vec
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
@@ -25,6 +26,7 @@ class GroundedTextualEntailmentModel(object):
         self.graph = self.create_graph()
         self.session = tf.Session()
         self.best_f1 = self.get_best_f1()
+        self.img2vec = Image2vec() if options.with_img else None
 
     def __enter__(self):
         # self.session = tf.Session()
@@ -281,6 +283,7 @@ class GroundedTextualEntailmentModel(object):
                                          self.options.batch_size,
                                          self.word2id,
                                          self.label2id,
+                                         img2vec=self.img2vec,
                                          max_len_p=self.options.max_len_p,
                                          max_len_h=self.options.max_len_h),
                           total=math.ceil(LEN_DEV / self.options.batch_size)):
@@ -314,6 +317,7 @@ class GroundedTextualEntailmentModel(object):
                                                                   self.options.batch_size,
                                                                   self.word2id,
                                                                   self.label2id,
+                                                                  img2vec=self.img2vec,
                                                                   max_len_p=self.options.max_len_p,
                                                                   max_len_h=self.options.max_len_h)),
                                          total=math.ceil(LEN_TRAIN / self.options.batch_size)):
