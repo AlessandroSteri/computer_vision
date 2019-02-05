@@ -89,4 +89,4 @@ class Image2vec(object):
         with open(IMG_FEATS + "/all.pickle", "rb") as f:
             self.image_feats = pickle.load(f)
         with open(IMG_FEATS + "/ids.pickle", "rb") as f:
-            self.ids = pickle.load(f)
+            self.ids = pickle.load(f).flatten()
