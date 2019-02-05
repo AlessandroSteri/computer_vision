@@ -9,15 +9,16 @@ from gte.utils.dic import dic_lookup_case_sensitive
 
 class Batch(object):
     """Batch"""
-    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H):
+    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h):
         self.size = batch_size
         lookup = lambda x: dic_lookup_case_sensitive(word2id, x, UNK)
         self.P = self._map_sequences_id(P, lookup, max_len_p)
         self.H = self._map_sequences_id(H, lookup, max_len_h)
         self.labels = np.array([label2id[label] for label in labels])
-        self.lengths_P = np.array([len(p) for p in P])
-        self.lengths_H = np.array([len(h) for h in H])
+        self.lengths_P = np.array([min(len(p), max_len_p) for p in P])
+        self.lengths_H = np.array([min(len(h), max_len_h) for h in H])
         self.IDs = np.array(IDs)
+        self.I = np.ones([batch_size, 49, 512], dtype=np.float32)
 
         assert len(self.labels) == len(self.P)
         assert len(self.labels) == len(self.H)
@@ -63,7 +64,7 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, max_len_p=MAX_LE
                         # premise = row[4].strip()
                         # hypothesis = row[5].strip()
                 #complete batch
-                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H)
+                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h)
             yield batch
             end_epoch = last_batch
             last_batch = False

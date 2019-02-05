@@ -1,10 +1,11 @@
 import os
+import math
 import tensorflow as tf
 import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
 from gte.utils.tf import bilstm_layer
 from gte.match.match_utils import bilateral_match_func
 
@@ -66,7 +67,7 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
-        self.matching_layer()
+        if self.options.with_matching: self.matching_layer()
         # self.aggregation_layer()
         self.opt_loss_layer()
         self.prediction_layer()
@@ -82,6 +83,7 @@ class GroundedTextualEntailmentModel(object):
         with tf.name_scope('INPUTS'):
             self.P = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P')  # shape [batch_size, max_len_p]
             self.H = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H')  # shape [batch_size, max_len_h]
+            self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, NUM_FEATS, FEAT_SIZE], name='H')  # shape [batch_size, max_len_h]
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
@@ -196,28 +198,65 @@ class GroundedTextualEntailmentModel(object):
 
             logits = tf.matmul(self.match_representation, w_0) + b_0
             self.match_logits = tf.tanh(logits)
+            self.match_logits = tf.matmul(self.match_logits, w_1) + b_1
 
     def opt_loss_layer(self):
         with tf.name_scope('OPT_LOSS'):
-            W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
-            b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
 
-            # self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
-            # self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
+            if not self.options.with_matching:
+                B = self.options.batch_size
+                HH = 2*self.options.hidden_size
+                L_p = self.options.max_len_p
+                L_h = self.options.max_len_h
+                self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
+                if self.options.with_img:
+                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
+                    W_img = tf.get_variable("w_img", [HH, FEAT_SIZE], dtype=tf.float32)
+                    b_img = tf.get_variable("b_img", [FEAT_SIZE], dtype=tf.float32)
+                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_img) + b_img
+                    self.latent_repr = tf.reshape(self.latent_repr_flat, [B, (L_p + L_h), FEAT_SIZE], name='ciaociao')
+                    self.latent_repr = tf.concat([self.latent_repr, self.I], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
+                    W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
-            # W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
-            # b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
+                else:
+                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
+                    W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
 
-            self.pred = tf.matmul(self.match_logits, W_match) + b_match
-            self.score = self.pred
-            self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
-            self.loss = tf.reduce_mean(self.losses)
-            self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
+                b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
+
+
+                # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
+                # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
+                # self.pred = tf.matmul(self.match_logits, W_match) + b_match
+
+                self.pred = tf.matmul(self.latent_repr_flat, W) + b
+
+                self.score = self.pred
+                self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.score, labels=self.labels, name='unmasked_losses')
+                self.loss = tf.reduce_mean(self.losses)
+                self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
+            else:
+
+                self.prob = tf.nn.softmax(self.match_logits)
+                gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+                self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
+
+                clipper = 50
+                optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+                tvars = tf.trainable_variables()
+                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+                self.loss = self.loss + 1e-5 * l2_loss
+                grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
             loss_summ = tf.summary.scalar('loss', self.loss)
             self.train_summary.append(loss_summ)
 
     def prediction_layer(self):
         with tf.name_scope('PREDICTION'):
+
+            if self.options.with_matching: self.score = self.match_logits
             self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
             self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
 
@@ -243,10 +282,12 @@ class GroundedTextualEntailmentModel(object):
                                          self.word2id,
                                          self.label2id,
                                          max_len_p=self.options.max_len_p,
-                                         max_len_h=self.options.max_len_h)):
+                                         max_len_h=self.options.max_len_h),
+                          total=math.ceil(LEN_DEV / self.options.batch_size)):
             if batch is None: break
             feed_dict_train = {self.P: batch.P,
                                self.H: batch.H,
+                               self.I: batch.I,
                                self.lengths_P: batch.lengths_P,
                                self.lengths_H: batch.lengths_H}
             [p] = self.session.run([self.predict_op], feed_dict=feed_dict_train)
@@ -268,7 +309,14 @@ class GroundedTextualEntailmentModel(object):
         for _epoch in range(self.options.epoch):
             epoch = _epoch + 1
             print('Starting epoch: {}/{}'.format(epoch, self.options.epoch))
-            for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA, self.options.batch_size, self.word2id, self.label2id, max_len_p=self.options.max_len_p, max_len_h=self.options.max_len_h))):
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            for iteration, batch in tqdm(enumerate(generate_batch(TRAIN_DATA,
+                                                                  self.options.batch_size,
+                                                                  self.word2id,
+                                                                  self.label2id,
+                                                                  max_len_p=self.options.max_len_p,
+                                                                  max_len_h=self.options.max_len_h)),
+                                         total=math.ceil(LEN_TRAIN / self.options.batch_size)):
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                 if batch is None:
                     print("End of eval.")
@@ -278,6 +326,7 @@ class GroundedTextualEntailmentModel(object):
                 train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
                 feed_dict_train = {self.P: batch.P,
                                    self.H: batch.H,
+                                   self.I: batch.I,
                                    self.labels: batch.labels,
                                    self.lengths_P: batch.lengths_P,
                                    self.lengths_H: batch.lengths_H}
@@ -286,12 +335,12 @@ class GroundedTextualEntailmentModel(object):
                                       self.loss,
                                       self.predict_op,
                                       # self.match_representation,
-                                      self.match_logits,
+                                      # self.match_logits,
                                       # self.match_dim,
                                       train_summary],
                                      feed_dict=feed_dict_train,
                                      run_metadata=run_metadata)
-                _, loss, predictions, mr, summary= result
+                _, loss, predictions, summary= result
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
 
                 # Add returned summaries to writer in each step, where
