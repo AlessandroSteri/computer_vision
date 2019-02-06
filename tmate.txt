@@ -1,0 +1,6 @@
+Wed Feb  6 10:25:53 2019 [tmate] Connecting to ssh.tmate.io...
+Wed Feb  6 10:25:59 2019 [tmate] Note: clear your terminal before sharing readonly access
+Wed Feb  6 10:25:59 2019 [tmate] web session read only: https://tmate.io/t/ro-UgA8JaqI8YYMZz4kllhAxUZUv
+Wed Feb  6 10:25:59 2019 [tmate] ssh session read only: ssh ro-UgA8JaqI8YYMZz4kllhAxUZUv@fk2.tmate.io
+Wed Feb  6 10:25:59 2019 [tmate] web session: https://tmate.io/t/UZ3QYauBKo72ZNljInnLFCw1W
+Wed Feb  6 10:25:59 2019 [tmate] ssh session: ssh UZ3QYauBKo72ZNljInnLFCw1W@fk2.tmate.io
