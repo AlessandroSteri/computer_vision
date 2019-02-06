@@ -66,5 +66,24 @@ def words_to_dictionary(words, embedding_name, embedding_size):
     embeddings, word_to_index, index_to_word = retrieve_embeddings(embedding_name, embedding_size, words)
     return embeddings, word_to_index, index_to_word
 
+def generate_non_token_datasets():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
+    TO_BE_TAGGED_DIR = './DATA/vsnli/TO_BE_TAGGED'
+    mkdir(TO_BE_TAGGED_DIR)
+    P = ""
+    H = ""
+    for filename in datasets:
+        with open(filename) as f:
+            reader = csv.reader(f, delimiter="\t")
+            next(reader, None) #skip header
+            for row in reader:
+                P += (row[4].strip() + "\n")
+                H += (row[5].strip() + "\n")
+        name = filename.split("/")[-1][:-4]
+        with open(TO_BE_TAGGED_DIR + "/premises_{}.txt".format(name), "w+") as f:
+            f.write(P)
+        with open(TO_BE_TAGGED_DIR + "/hypothesis_{}.txt".format(name), "w+") as f:
+            f.write(H)
+
 # def datasets_to_index(datasets, word_to_index, use_only_token=True):
 
