@@ -70,9 +70,9 @@ def generate_non_token_datasets():
     datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
     TO_BE_TAGGED_DIR = './DATA/vsnli/TO_BE_TAGGED'
     mkdir(TO_BE_TAGGED_DIR)
-    P = ""
-    H = ""
     for filename in datasets:
+        P = ""
+        H = ""
         with open(filename) as f:
             reader = csv.reader(f, delimiter="\t")
             next(reader, None) #skip header
