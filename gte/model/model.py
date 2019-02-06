@@ -396,20 +396,22 @@ class GroundedTextualEntailmentModel(object):
                     print("RunID:", self.ID)
                     print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
                     print("Loss: ", loss)
-                    print('--------------------------------')
                     if step != 0:
-                        # give back control to callee to run evaluation
+                        # Predict without training
                         eval_predictions, labels = self.predict(DEV_DATA)
                         assert len(labels) == len(eval_predictions)
                         accuracy = sum(labels == eval_predictions)/len(labels)
                         print("Accuracy: {}".format(accuracy))
                         f1 = f1_score(labels, eval_predictions, average='micro')
                         print("F1: {}".format(f1))
+                        print('--------------------------------')
 
                         delta = 1.1
                         if f1 >= self.best_f1 * delta:
-                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
+                            print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
+                            print('--------------------------------')
                             self.store_best_f1(f1)
+                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
 
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
