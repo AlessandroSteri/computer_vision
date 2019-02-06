@@ -85,5 +85,46 @@ def generate_non_token_datasets():
         with open(TO_BE_TAGGED_DIR + "/hypothesis_{}.txt".format(name), "w+") as f:
             f.write(H)
 
+#Format: LP1_LP2_LP3#LH1_LH2_LH3\tDP1_DP2_DP3#DH1_DH2_DH3
+def generate_datasets_with_dependency():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
+    DEP_DIR = './DATA/vsnli/DEP'
+    TAGGED_DIR = './DATA/vsnli/TAGGED'
+    mkdir(DEP_DIR)
+    for filename in datasets:
+        new_dataset = ""
+        name = filename.split("/")[-1][:-4]
+        P_file = TAGGED_DIR + "/premises_{}.txt".format(name)
+        H_file = TAGGED_DIR + "/hypothesis_{}.txt".format(name)
+        with open(filename) as f, open(P_file) as P_f, open(H_file) as H_f:
+            lines = f.readlines()[1:]#skip header
+            P_reader = csv.reader(P_f, delimiter="\t")
+            H_reader = csv.reader(H_f, delimiter="\t")
+            for row in lines: #for each sentence
+                levels = ""
+                relations = ""
+                for P_word in P_reader: #for each word in P
+                    if not P_word:
+                        break
+                    if len(P_word) < 8:
+                        print(P_word)
+                    levels += P_word[6] + "_"
+                    relations += P_word[7] + "_"
+                levels = levels[:-1] + "#"
+                relations = relations[:-1] + "#"
+                for H_word in H_reader: #for each word in P
+                    if not H_word:
+                        break
+                    if len(H_word) < 8:
+                        print(H_word)
+                    levels += H_word[6] + "_"
+                    relations += H_word[7] + "_"
+                levels = levels[:-1]
+                relations = relations[:-1]
+                new_dataset += row.strip("\n") + "\t" + levels + "\t" + relations + "\n"
+        with open(DEP_DIR + "/{}.tsv".format(name), "w+") as f:
+            f.write(new_dataset)
+
+
 # def datasets_to_index(datasets, word_to_index, use_only_token=True):
 
