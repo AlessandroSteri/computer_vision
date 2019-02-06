@@ -46,6 +46,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_img", dest="with_img", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("--with_img2", dest="with_img2", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("hidden_size", type=int, help="Length of hidden layer.")
+    cmdLineParser.add_argument("--dropout", dest="dropout", action='store_true', help="Applies dropout at the latent representation.")
     options = cmdLineParser.parse_args()
 
     env = ''

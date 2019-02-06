@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
 from gte.utils.tf import bilstm_layer, highway
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
@@ -93,6 +93,10 @@ class GroundedTextualEntailmentModel(object):
             self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32, name='P_mask')  # [batch_size, max_len_p]
             self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32, name='H_mask')  # [batch_size, max_len_h]
             self.I_mask = tf.sequence_mask([NUM_FEATS for _ in range(self.options.batch_size)], NUM_FEATS, dtype=tf.float32, name='I_mask')  # [batch_size, NUM_FEATS]
+        with tf.name_scope('IS_TRAINING'):
+            self.is_training = tf.placeholder(tf.bool, shape=[], name='is_training')
+            if self.options.dropout:
+                self.keep_probability = tf.placeholder(tf.float32, shape=[], name='un_dropout_rate')
 
     def embedding_layer(self):
         with tf.name_scope('EMBEDDINGS'):
@@ -110,9 +114,10 @@ class GroundedTextualEntailmentModel(object):
             L_p = self.options.max_len_p
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
-            self.context_p = self.directional_lstm(self.P_lookup, 2, self.options.hidden_size, 0.5)
+            kp = self.keep_probability if self.options.dropout else 1
+            self.context_p = self.directional_lstm(self.P_lookup, 2, self.options.hidden_size, kp)
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
-            self.context_h = self.directional_lstm(self.H_lookup, 2, self.options.hidden_size, 0.5)
+            self.context_h = self.directional_lstm(self.H_lookup, 2, self.options.hidden_size, kp)
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -245,6 +250,8 @@ class GroundedTextualEntailmentModel(object):
                     self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
                     self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
+                    if self.options.dropout:
+                        self.latent_repr_flat = tf.nn.dropout(self.latent_repr_flat, self.keep_probability)
                     W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
                 else:
@@ -330,12 +337,15 @@ class GroundedTextualEntailmentModel(object):
                                          max_len_h=self.options.max_len_h),
                           total=math.ceil(LEN_DEV / self.options.batch_size)):
             if batch is None: break
-            feed_dict_train = {self.P: batch.P,
-                               self.H: batch.H,
-                               self.I: batch.I,
-                               self.lengths_P: batch.lengths_P,
-                               self.lengths_H: batch.lengths_H}
-            [p] = self.session.run([self.predict_op], feed_dict=feed_dict_train)
+            feed_dict = {self.P: batch.P,
+                         self.H: batch.H,
+                         self.I: batch.I,
+                         self.lengths_P: batch.lengths_P,
+                         self.lengths_H: batch.lengths_H}
+            feed_dict[self.is_training] = False
+            if self.options.dropout:
+                feed_dict[self.keep_probability] = 1
+            [p] = self.session.run([self.predict_op], feed_dict=feed_dict)
             predictions += [_ for _ in p]
             labels += [_ for _ in batch.labels]
 
@@ -370,12 +380,15 @@ class GroundedTextualEntailmentModel(object):
                 step += 1
                 run_metadata = tf.RunMetadata()
                 train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
-                feed_dict_train = {self.P: batch.P,
-                                   self.H: batch.H,
-                                   self.I: batch.I,
-                                   self.labels: batch.labels,
-                                   self.lengths_P: batch.lengths_P,
-                                   self.lengths_H: batch.lengths_H}
+                feed_dict = {self.P: batch.P,
+                             self.H: batch.H,
+                             self.I: batch.I,
+                             self.labels: batch.labels,
+                             self.lengths_P: batch.lengths_P,
+                             self.lengths_H: batch.lengths_H}
+                feed_dict[self.is_training] = False
+                if self.options.dropout:
+                    feed_dict[self.keep_probability] = 0.5
 
                 result = session.run([self.optimizer,
                                       self.loss,
@@ -384,7 +397,7 @@ class GroundedTextualEntailmentModel(object):
                                       # self.match_logits,
                                       # self.match_dim,
                                       train_summary],
-                                     feed_dict=feed_dict_train,
+                                     feed_dict=feed_dict,
                                      run_metadata=run_metadata)
                 _, loss, predictions, summary= result
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
@@ -396,20 +409,35 @@ class GroundedTextualEntailmentModel(object):
                     print("RunID:", self.ID)
                     print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
                     print("Loss: ", loss)
-                    print('--------------------------------')
                     if step != 0:
-                        # give back control to callee to run evaluation
+                        if step >= 1000: # use module when is not crushing
+                            # Predict without training over test sets
+                            test_predictions, test_labels = self.predict(TEST_DATA)
+                            test_HARD_predictions, test_HARD_labels = self.predict(TEST_DATA_HARD)
+                            assert len(test_labels) == len(test_predictions)
+                            assert len(test_HARD_labels) == len(test_HARD_predictions)
+                            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+                            accuracy_test = sum(test_labels == test_predictions)/len(test_labels)
+                            accuracy_test_HARD = sum(test_HARD_labels == test_HARD_predictions)/len(test_HARD_labels)
+                            print("TEST Accuracy: {}".format(accuracy_test))
+                            print("TEST_HARD Accuracy: {}".format(accuracy_test_HARD))
+
+
+                        # Predict without training
                         eval_predictions, labels = self.predict(DEV_DATA)
                         assert len(labels) == len(eval_predictions)
                         accuracy = sum(labels == eval_predictions)/len(labels)
                         print("Accuracy: {}".format(accuracy))
                         f1 = f1_score(labels, eval_predictions, average='micro')
                         print("F1: {}".format(f1))
+                        print('--------------------------------')
 
                         delta = 1.1
                         if f1 >= self.best_f1 * delta:
-                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
+                            print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
+                            print('--------------------------------')
                             self.store_best_f1(f1)
+                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
 
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
