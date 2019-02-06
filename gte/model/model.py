@@ -105,8 +105,10 @@ class GroundedTextualEntailmentModel(object):
             HH = 2*self.options.hidden_size
             L_p = self.options.max_len_p
             L_h = self.options.max_len_h
-            self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
-            self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
+            # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
+            self.context_p = self.directional_lstm(self.P_lookup, 1, self.options.hidden_size, 0.5)
+            # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
+            self.context_h = self.directional_lstm(self.H_lookup, 1, self.options.hidden_size, 0.5)
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -449,3 +451,16 @@ class GroundedTextualEntailmentModel(object):
                                                 feed_dict=feed_dictionary)
                         self.writer.add_summary(eval_summ, step)
         self.writer.close()
+
+    def directional_lstm(self, input_data, num_layers, rnn_size, keep_prob):
+        output = input_data
+        for layer in range(num_layers):
+            with tf.variable_scope('encoder_{}'.format(layer),reuse=tf.AUTO_REUSE):
+                cell_fw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
+                # cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, input_keep_prob = keep_prob)
+                cell_bw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
+                # cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, input_keep_prob = keep_prob)
+                outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, dtype=tf.float32, swap_memory=True)
+                output = tf.concat(outputs,2)
+                return output
+
