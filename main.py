@@ -44,6 +44,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--trainable", dest="trainable", action='store_true', help="Makes trainable the pre-trained embeddigs.")
     cmdLineParser.add_argument("--with_matching", dest="with_matching", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("--with_img", dest="with_img", action='store_true', help="Makes use of bilateral matching.")
+    cmdLineParser.add_argument("--with_img2", dest="with_img2", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("hidden_size", type=int, help="Length of hidden layer.")
     options = cmdLineParser.parse_args()
 

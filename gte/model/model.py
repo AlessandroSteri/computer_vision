@@ -89,6 +89,10 @@ class GroundedTextualEntailmentModel(object):
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
+        with tf.name_scope('INPUTS_MASKS'):
+            self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32, name='P_mask')  # [batch_size, max_len_p]
+            self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32, name='H_mask')  # [batch_size, max_len_h]
+            self.I_mask = tf.sequence_mask([NUM_FEATS for _ in range(self.options.batch_size)], NUM_FEATS, dtype=tf.float32, name='I_mask')  # [batch_size, NUM_FEATS]
 
     def embedding_layer(self):
         with tf.name_scope('EMBEDDINGS'):
@@ -112,9 +116,6 @@ class GroundedTextualEntailmentModel(object):
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
-            self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32, name='P_mask')  # [batch_size, max_len_p]
-            self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32, name='H_mask')  # [batch_size, max_len_h]
-            self.I_mask = tf.sequence_mask([NUM_FEATS for _ in self.options.batch_size], NUM_FEATS, dtype=tf.float32, name='I_mask')  # [batch_size, NUM_FEATS]
             # ========Bilateral Matching=====
             out_image_feats = None
             in_question_repres = self.context_p
@@ -225,6 +226,26 @@ class GroundedTextualEntailmentModel(object):
                     self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
                     W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
+                if self.options.with_img2:
+                    self.context_p = highway(self.context_p, HH, tf.nn.relu)
+                    self.context_h = highway(self.context_h, HH, tf.nn.relu)
+                    latent_repr_flat_p = tf.reshape(self.context_p, [B * L_p, HH], name='lrf_p')
+                    latent_repr_flat_h = tf.reshape(self.context_h, [B * L_h, HH], name='lrf_h')
+                    # linear map from HH to FEAT_SIZE uniwue for p and h
+                    W_ph = tf.get_variable("w_pi", [HH, FEAT_SIZE], dtype=tf.float32)
+                    b_ph = tf.get_variable("b_pi", [FEAT_SIZE], dtype=tf.float32)
+                    latent_repr_flat_p = tf.matmul(latent_repr_flat_p, W_ph) + b_ph
+                    latent_repr_flat_h = tf.matmul(latent_repr_flat_h, W_ph) + b_ph
+                    latent_repr_flat_p = tf.reshape(latent_repr_flat_p, [B, L_p, FEAT_SIZE], name='lrf_p_3d')
+                    latent_repr_flat_h = tf.reshape(latent_repr_flat_h, [B, L_h, FEAT_SIZE], name='lrf_h_3d')
+                    latent_repr_flat_pi = tf.concat([self.I, latent_repr_flat_p], axis=-2, name='lrf_IP_3d') # [B, LP+NUM_FEATS, FEAT_SIZE]
+                    latent_repr_flat_hi = tf.concat([self.I, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, LH+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr_PI = highway(latent_repr_flat_pi, FEAT_SIZE, tf.nn.relu) # [B, LP+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr_HI = highway(latent_repr_flat_hi, FEAT_SIZE, tf.nn.relu) # [B, LH+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
+                    self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
+                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
+                    W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
                 else:
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
@@ -404,8 +425,10 @@ class GroundedTextualEntailmentModel(object):
         for layer in range(num_layers):
             with tf.variable_scope('encoder_{}'.format(layer),reuse=tf.AUTO_REUSE):
                 cell_fw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
+                # cell_fw = tf.contrib.rnn.AttentionCellWrapper(cell_fw, attn_length=40, state_is_tuple=True)
                 # cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, input_keep_prob = keep_prob)
                 cell_bw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
+                # cell_bw = tf.contrib.rnn.AttentionCellWrapper(cell_bw, attn_length=40, state_is_tuple=True)
                 # cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, input_keep_prob = keep_prob)
                 outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, dtype=tf.float32, swap_memory=True)
                 output = tf.concat(outputs,2)
