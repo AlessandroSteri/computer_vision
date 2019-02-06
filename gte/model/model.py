@@ -114,9 +114,10 @@ class GroundedTextualEntailmentModel(object):
             L_p = self.options.max_len_p
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
-            self.context_p = self.directional_lstm(self.P_lookup, 2, self.options.hidden_size, self.keep_probability)
+            kp = self.keep_probability if self.options.dropout else 1
+            self.context_p = self.directional_lstm(self.P_lookup, 2, self.options.hidden_size, kp)
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
-            self.context_h = self.directional_lstm(self.H_lookup, 2, self.options.hidden_size, self.keep_probability)
+            self.context_h = self.directional_lstm(self.H_lookup, 2, self.options.hidden_size, kp)
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
