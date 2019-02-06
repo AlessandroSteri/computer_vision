@@ -12,24 +12,23 @@ def main(options, ID):
     if not os.path.exists(SHUFFLED_DIR): generate_shuffled_datasets()
 
     words, labels, lens_p, lens_h = datasets_to_word_set()
-    print("Words: ", len(words))
-    print("Labels: ", labels)
+    # print("Words: ", len(words))
+    # print("Labels: ", labels)
 
-    # embedding_name = 'glove'
-    # embedding_size = 50
     embeddings, word2id, id2word = words_to_dictionary(words, options.embedding_name, options.embedding_size)
     label2id, id2label = index_map(list(labels))
 
     # image2vec = Image2vec(has_model=True)
     # image2vec.compute_all_feats_and_store()
 
-    # gte_model = GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label)
+    # Model as context manager
     with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label) as gte_model:
         gte_model.fit()
 
 
 if __name__ == '__main__':
-     ### CLI args ###{{{
+    # ### CLI args ### #
+    # {{{
     cmdLineParser = argparse.ArgumentParser()
     cmdLineParser.add_argument("epoch", default=1, type=int, help="Number of full training-set iterations.")
     cmdLineParser.add_argument("batch_size", default=8, type=int, help="Number of samples per batch.")
@@ -50,12 +49,31 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--attentive", dest="attentive", action='store_true', help="Applies cross multihead attention to PI vs PI and HI vs HI.")
     cmdLineParser.add_argument("--attentive_swap", dest="attentive_swap", action='store_true', help="Applies cross multihead attention to PI vs HI and HI vs PI.")
     options = cmdLineParser.parse_args()
+    # }}}
 
+    # ### Unique Run ID with Hyperparameters Info ### #
+    # {{{
     env = ''
-    if options.dev_env: env = 'DEV '
+    if options.dev_env: env = '[DEV]'
 
-    model_info = '' #to log wich layer of the model are used
+    model_info = ' B[{}]_Emb[{}]_lr[{}]_Lp[{}]_Lh[{}]'.format(options.batch_size,
+                                                             options.embedding_name,
+                                                             options.learning_rate,
+                                                             options.max_len_p,
+                                                             options.max_len_h)
+    if options.trainable: model_info += 'T.'.format()
+    if options.with_matching: model_info += 'M.'.format()
+    if options.with_img2 or options.with_img: model_info += 'I.'.format()
+    if options.dropout: model_info += 'D.'.format()
+    if options.attentive: model_info += 'A.'.format()
+    if options.attentive_swap: model_info += 'Asw'.format()
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
-    ID = exe_id + ' [' + env +  '_b' + str(options.batch_size) + '_e' + str(options.epoch) + '_l' + str(options.learning_rate) + '_c' + str(options.step_check) + '_model' + '--{}]'.format(model_info)
+    ID = exe_id + env + model_info
+    # }}}
 
+    # '_b' + str(options.batch_size) + '_e' + str(options.epoch) + '_l' + str(options.learning_rate) + '_c' + str(options.step_check) + '_model' + '--{}]'.format(
+
+    # ### MAIN ### #
+    # {{{
     main(options, ID)
+    # }}}
