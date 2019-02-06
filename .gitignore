@@ -4,6 +4,8 @@ log/*
 # glove
 glove/*
 gensim_glove_vectors.txt
+#dependency code
+gte/preprocessing/models
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

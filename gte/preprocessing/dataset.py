@@ -106,8 +106,6 @@ def generate_datasets_with_dependency():
                 for P_word in P_reader: #for each word in P
                     if not P_word:
                         break
-                    if len(P_word) < 8:
-                        print(P_word)
                     levels += P_word[6] + "_"
                     relations += P_word[7] + "_"
                 levels = levels[:-1] + "#"
@@ -115,8 +113,6 @@ def generate_datasets_with_dependency():
                 for H_word in H_reader: #for each word in P
                     if not H_word:
                         break
-                    if len(H_word) < 8:
-                        print(H_word)
                     levels += H_word[6] + "_"
                     relations += H_word[7] + "_"
                 levels = levels[:-1]
