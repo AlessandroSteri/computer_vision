@@ -9,6 +9,7 @@ from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_
 from gte.utils.tf import bilstm_layer, highway
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
+from gte.att.attention import multihead_attention
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
@@ -247,6 +248,13 @@ class GroundedTextualEntailmentModel(object):
                     latent_repr_flat_hi = tf.concat([self.I, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, LH+NUM_FEATS, FEAT_SIZE]
                     self.latent_repr_PI = highway(latent_repr_flat_pi, FEAT_SIZE, tf.nn.relu) # [B, LP+NUM_FEATS, FEAT_SIZE]
                     self.latent_repr_HI = highway(latent_repr_flat_hi, FEAT_SIZE, tf.nn.relu) # [B, LH+NUM_FEATS, FEAT_SIZE]
+                    if self.options.attentive:
+                        self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_PI, is_training=self.is_training, scope="PI_attention")
+                        self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_HI, is_training=self.is_training, scope="HI_attention")
+                    if self.options.attentive_swap:
+                        self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_HI, is_training=self.is_training, scope="PI_attention")
+                        self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_PI, is_training=self.is_training, scope="HI_attention")
+
                     self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
                     self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
                     self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
@@ -386,7 +394,7 @@ class GroundedTextualEntailmentModel(object):
                              self.labels: batch.labels,
                              self.lengths_P: batch.lengths_P,
                              self.lengths_H: batch.lengths_H}
-                feed_dict[self.is_training] = False
+                feed_dict[self.is_training] = True
                 if self.options.dropout:
                     feed_dict[self.keep_probability] = 0.5
 
