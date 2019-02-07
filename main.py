@@ -3,7 +3,7 @@ import argparse
 from gte.model import GroundedTextualEntailmentModel
 from gte.utils.log import id_gen
 from gte.utils.dic import index_map
-from gte.info import MAX_LEN_P, MAX_LEN_H, SHUFFLED_DIR
+from gte.info import MAX_LEN_P, MAX_LEN_H, SHUFFLED_DIR, DEP_REL
 from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary, generate_shuffled_datasets
 from gte.images import Image2vec
 
@@ -17,12 +17,13 @@ def main(options, ID):
 
     embeddings, word2id, id2word = words_to_dictionary(words, options.embedding_name, options.embedding_size)
     label2id, id2label = index_map(list(labels))
+    rel2id, id2rel = index_map(DEP_REL)
 
     # image2vec = Image2vec(has_model=True)
     # image2vec.compute_all_feats_and_store()
 
     # Model as context manager
-    with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label) as gte_model:
+    with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel) as gte_model:
         gte_model.fit()
 
 
@@ -55,6 +56,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_matching", dest="with_matching", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("--with_img", dest="with_img", action='store_true', help="Makes use of bilateral matching.")
     cmdLineParser.add_argument("--with_img2", dest="with_img2", action='store_true', help="Makes use of bilateral matching.")
+    cmdLineParser.add_argument("--with_DEP", dest="with_DEP", action='store_true', help="Makes use of Dependency Tree.")
     cmdLineParser.add_argument("--dropout", dest="dropout", action='store_true', help="Applies dropout at the latent representation.")
     cmdLineParser.add_argument("--attentive", dest="attentive", action='store_true', help="Applies cross multihead attention to PI vs PI and HI vs HI.")
     cmdLineParser.add_argument("--attentive_swap", dest="attentive_swap", action='store_true', help="Applies cross multihead attention to PI vs HI and HI vs PI.")

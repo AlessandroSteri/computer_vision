@@ -35,3 +35,43 @@ LEN_TRAIN = 545621 - 1
 LEN_DEV = 9843 - 1
 LEN_TEST = 9825 - 1
 LEN_TEST_HARD = 545621 - 1
+
+DEP_REL = [
+    "acl",
+    "advcl",
+    "advmod",
+    "amod",
+    "appos",
+    "aux",
+    "case",
+    "cc",
+    "ccomp",
+    "clf",
+    "compound",
+    "conj",
+    "cop",
+    "csubj",
+    "dep",
+    "det",
+    "discourse",
+    "dislocated",
+    "expl",
+    "fixed",
+    "flat",
+    "goeswith",
+    "iobj",
+    "list",
+    "mark",
+    "nmod",
+    "nsubj",
+    "nummod",
+    "obj",
+    "obl",
+    "orphan",
+    "parataxis",
+    "punct",
+    "reparandum",
+    "root",
+    "vocative",
+    "xcomp"
+]

@@ -13,7 +13,7 @@ from gte.att.attention import multihead_attention
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
-    def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label):
+    def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel):
         self.options = options
         self.ID = ID
         self.embeddings = embeddings
@@ -21,6 +21,8 @@ class GroundedTextualEntailmentModel(object):
         self.id2word = id2word
         self.label2id = label2id
         self.id2label = id2label
+        self.rel2id = rel2id
+        self.id2rel = id2rel
         self.train_summary = []
         self.eval_summary = []
         self.test_summary = []
@@ -325,9 +327,11 @@ class GroundedTextualEntailmentModel(object):
                                          self.options.batch_size,
                                          self.word2id,
                                          self.label2id,
+                                         self.rel2id,
                                          img2vec=self.img2vec,
                                          max_len_p=self.options.max_len_p,
-                                         max_len_h=self.options.max_len_h),
+                                         max_len_h=self.options.max_len_h,
+                                         with_DEP=self.options.with_DEP),
                           total=math.ceil(LEN_DEV / self.options.batch_size)):
             if batch is None: break
             feed_dict = {self.P: batch.P,
@@ -362,9 +366,11 @@ class GroundedTextualEntailmentModel(object):
                                                                   self.options.batch_size,
                                                                   self.word2id,
                                                                   self.label2id,
+                                                                  self.rel2id,
                                                                   img2vec=self.img2vec,
                                                                   max_len_p=self.options.max_len_p,
-                                                                  max_len_h=self.options.max_len_h)),
+                                                                  max_len_h=self.options.max_len_h,
+                                                                  with_DEP=self.options.with_DEP)),
                                          total=math.ceil(LEN_TRAIN / self.options.batch_size)):
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                 if batch is None:
