@@ -74,8 +74,10 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=
                         IDs += ID
                         if with_DEP:
                             levels = row[7].strip().split("#")
-                            P_lv += [levels[0].split("_")]
-                            H_lv += [levels[1].split("_")]
+                            P_level = levels[0].split("_")
+                            P_lv += [P_level] if P_level else [max_len_p]
+                            H_level = levels[1].split("_")
+                            H_lv += [H_level] if H_level else [max_len_h]
                             relations = row[8].strip().split("#")
                             P_rel += [relations[0].split("_")]
                             H_rel += [relations[1].split("_")]
