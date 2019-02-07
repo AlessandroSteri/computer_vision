@@ -71,7 +71,6 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
         if self.options.with_matching: self.matching_layer()
-        # self.aggregation_layer()
         self.opt_loss_layer()
         self.prediction_layer()
 
@@ -116,9 +115,9 @@ class GroundedTextualEntailmentModel(object):
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
             kp = self.keep_probability if self.options.dropout else 1
-            self.context_p = self.directional_lstm(self.P_lookup, 2, self.options.hidden_size, kp)
+            self.context_p = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
-            self.context_h = self.directional_lstm(self.H_lookup, 2, self.options.hidden_size, kp)
+            self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -211,117 +210,103 @@ class GroundedTextualEntailmentModel(object):
             logits = tf.matmul(self.match_representation, w_0) + b_0
             self.match_logits = tf.tanh(logits)
             self.match_logits = tf.matmul(self.match_logits, w_1) + b_1
+            self.prob = tf.nn.softmax(self.match_logits)
+            gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
+
+            clipper = 50
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+            tvars = tf.trainable_variables()
+            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+            self.loss = self.loss + 1e-5 * l2_loss
+            grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
+            # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
+            # self.pred = tf.matmul(self.match_logits, W_match) + b_match
+            if self.options.with_matching: self.score = self.match_logits
 
     def opt_loss_layer(self):
         with tf.name_scope('OPT_LOSS'):
+            # if not self.options.with_matching:
+            B = self.options.batch_size
+            HH = 2*self.options.hidden_size
+            L_p = self.options.max_len_p
+            L_h = self.options.max_len_h
+            self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
+            if self.options.with_img:
+                self.latent_repr = highway(self.latent_repr, HH, tf.nn.relu)
+                self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
+                W_img = tf.get_variable("w_img", [HH, FEAT_SIZE], dtype=tf.float32)
+                b_img = tf.get_variable("b_img", [FEAT_SIZE], dtype=tf.float32)
+                self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_img) + b_img
+                self.latent_repr = tf.reshape(self.latent_repr_flat, [B, (L_p + L_h), FEAT_SIZE], name='ciaociao')
+                self.latent_repr = tf.concat([self.latent_repr, self.I], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
+                self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
+                self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
+                W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
+                self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
+                W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
+            if self.options.with_img2:
+                self.context_p = highway(self.context_p, HH, tf.nn.relu)
+                self.context_h = highway(self.context_h, HH, tf.nn.relu)
+                latent_repr_flat_p = tf.reshape(self.context_p, [B * L_p, HH], name='lrf_p')
+                latent_repr_flat_h = tf.reshape(self.context_h, [B * L_h, HH], name='lrf_h')
+                # linear map from HH to FEAT_SIZE uniwue for p and h
+                W_ph = tf.get_variable("w_pi", [HH, FEAT_SIZE], dtype=tf.float32)
+                b_ph = tf.get_variable("b_pi", [FEAT_SIZE], dtype=tf.float32)
+                latent_repr_flat_p = tf.matmul(latent_repr_flat_p, W_ph) + b_ph
+                latent_repr_flat_h = tf.matmul(latent_repr_flat_h, W_ph) + b_ph
+                latent_repr_flat_p = tf.reshape(latent_repr_flat_p, [B, L_p, FEAT_SIZE], name='lrf_p_3d')
+                latent_repr_flat_h = tf.reshape(latent_repr_flat_h, [B, L_h, FEAT_SIZE], name='lrf_h_3d')
+                latent_repr_flat_pi = tf.concat([self.I, latent_repr_flat_p], axis=-2, name='lrf_IP_3d') # [B, NUM_FEATS+LP, FEAT_SIZE]
+                latent_repr_flat_hi = tf.concat([self.I, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, NUM_FEATS+LH, FEAT_SIZE]
+                self.latent_repr_PI = highway(latent_repr_flat_pi, FEAT_SIZE, tf.nn.relu) # [B, NUM_FEATS+LP, FEAT_SIZE]
+                self.latent_repr_HI = highway(latent_repr_flat_hi, FEAT_SIZE, tf.nn.relu) # [B, NUM_FEATS+LH, FEAT_SIZE]
+                if self.options.attentive:
+                    self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_PI, is_training=self.is_training, scope="PI_attention")
+                    self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_HI, is_training=self.is_training, scope="HI_attention")
+                if self.options.attentive_swap:
+                    self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_HI, is_training=self.is_training, scope="PI_attention")
+                    self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_PI, is_training=self.is_training, scope="HI_attention")
 
-            if not self.options.with_matching:
-                B = self.options.batch_size
-                HH = 2*self.options.hidden_size
-                L_p = self.options.max_len_p
-                L_h = self.options.max_len_h
-                self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
-                if self.options.with_img:
-                    self.latent_repr = highway(self.latent_repr, HH, tf.nn.relu)
-                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
-                    W_img = tf.get_variable("w_img", [HH, FEAT_SIZE], dtype=tf.float32)
-                    b_img = tf.get_variable("b_img", [FEAT_SIZE], dtype=tf.float32)
-                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_img) + b_img
-                    self.latent_repr = tf.reshape(self.latent_repr_flat, [B, (L_p + L_h), FEAT_SIZE], name='ciaociao')
-                    self.latent_repr = tf.concat([self.latent_repr, self.I], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
-                    self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
-                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
-                    W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
-                if self.options.with_img2:
-                    self.context_p = highway(self.context_p, HH, tf.nn.relu)
-                    self.context_h = highway(self.context_h, HH, tf.nn.relu)
-                    latent_repr_flat_p = tf.reshape(self.context_p, [B * L_p, HH], name='lrf_p')
-                    latent_repr_flat_h = tf.reshape(self.context_h, [B * L_h, HH], name='lrf_h')
-                    # linear map from HH to FEAT_SIZE uniwue for p and h
-                    W_ph = tf.get_variable("w_pi", [HH, FEAT_SIZE], dtype=tf.float32)
-                    b_ph = tf.get_variable("b_pi", [FEAT_SIZE], dtype=tf.float32)
-                    latent_repr_flat_p = tf.matmul(latent_repr_flat_p, W_ph) + b_ph
-                    latent_repr_flat_h = tf.matmul(latent_repr_flat_h, W_ph) + b_ph
-                    latent_repr_flat_p = tf.reshape(latent_repr_flat_p, [B, L_p, FEAT_SIZE], name='lrf_p_3d')
-                    latent_repr_flat_h = tf.reshape(latent_repr_flat_h, [B, L_h, FEAT_SIZE], name='lrf_h_3d')
-                    latent_repr_flat_pi = tf.concat([self.I, latent_repr_flat_p], axis=-2, name='lrf_IP_3d') # [B, LP+NUM_FEATS, FEAT_SIZE]
-                    latent_repr_flat_hi = tf.concat([self.I, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, LH+NUM_FEATS, FEAT_SIZE]
-                    self.latent_repr_PI = highway(latent_repr_flat_pi, FEAT_SIZE, tf.nn.relu) # [B, LP+NUM_FEATS, FEAT_SIZE]
-                    self.latent_repr_HI = highway(latent_repr_flat_hi, FEAT_SIZE, tf.nn.relu) # [B, LH+NUM_FEATS, FEAT_SIZE]
-                    if self.options.attentive:
-                        self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_PI, is_training=self.is_training, scope="PI_attention")
-                        self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_HI, is_training=self.is_training, scope="HI_attention")
-                    if self.options.attentive_swap:
-                        self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_HI, is_training=self.is_training, scope="PI_attention")
-                        self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_PI, is_training=self.is_training, scope="HI_attention")
+                self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
+                self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
+                self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
+                if self.options.dropout:
+                    self.latent_repr_flat = tf.nn.dropout(self.latent_repr_flat, self.keep_probability)
+                # TODO w b activation dimezzando ogni volta shape tipo while ceil..
+                W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
-                    self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
-                    self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
-                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
-                    if self.options.dropout:
-                        self.latent_repr_flat = tf.nn.dropout(self.latent_repr_flat, self.keep_probability)
-                    W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
+            b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
 
-                else:
-                    self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
-                    W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
+            self.score = tf.matmul(self.latent_repr_flat, W) + b
+            # self.score = self.pred
 
-                b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
+            # old loss
+            # gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+            # self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix, name='unmasked_losses')
+            # self.loss = tf.reduce_mean(self.losses)
+            # self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
 
-
-
-                # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
-                # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
-                # self.pred = tf.matmul(self.match_logits, W_match) + b_match
-
-                self.pred = tf.matmul(self.latent_repr_flat, W) + b
-
-                self.score = self.pred
-
-                # gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-
-                # self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix, name='unmasked_losses')
-                # self.loss = tf.reduce_mean(self.losses)
-                # self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
-
-
-                self.prob = tf.nn.softmax(self.score)
-                gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-                self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix))
-                clipper = 50
-                optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
-                tvars = tf.trainable_variables()
-                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
-                self.loss = self.loss + 1e-5 * l2_loss
-                grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
-            else:
-
-                self.prob = tf.nn.softmax(self.match_logits)
-                gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-                self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
-
-                clipper = 50
-                optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
-                tvars = tf.trainable_variables()
-                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
-                self.loss = self.loss + 1e-5 * l2_loss
-                grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            self.prob = tf.nn.softmax(self.score)
+            gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix))
+            clipper = 50
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+            tvars = tf.trainable_variables()
+            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+            self.loss = self.loss + 1e-5 * l2_loss
+            grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
 
             loss_summ = tf.summary.scalar('loss', self.loss)
             self.train_summary.append(loss_summ)
 
     def prediction_layer(self):
         with tf.name_scope('PREDICTION'):
-
-            if self.options.with_matching: self.score = self.match_logits
             self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
             self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
-
-    def aggregation_layer(self):
-        with tf.name_scope('AGGREGATION'):
-            pass
 
     def create_evaluation_graph(self):
         with tf.name_scope('eval'):
@@ -398,6 +383,7 @@ class GroundedTextualEntailmentModel(object):
                 if self.options.dropout:
                     feed_dict[self.keep_probability] = 0.5
 
+                if self.options.with_matching: print("MATCHING is not run!!")
                 result = session.run([self.optimizer,
                                       self.loss,
                                       self.predict_op,
