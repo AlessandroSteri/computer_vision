@@ -121,6 +121,9 @@ class GroundedTextualEntailmentModel(object):
                 self.P_dep = tf.concat([self.P_rel_lookup, self.P_lv_lookup], axis=-1, name='P_dep') # [batch_size, max_len_p, DEP_REL_SIZE+max_len_p]
                 self.H_dep = tf.concat([self.H_rel_lookup, self.H_lv_lookup], axis=-1, name='H_dep') # [batch_size, max_len_h, DEP_REL_SIZE+max_len_h]
 
+                kp = self.keep_probability if self.options.dropout else 1
+                self.P_dep = self.directional_lstm(self.P_dep, 1, 20, kp, name='DEP')
+                self.H_dep = self.directional_lstm(self.H_dep, 1, 20, kp, name='DEP')
                 self.P_lookup = tf.concat([self.P_lookup, self.P_dep], axis=-1, name='P_lookup_dep') # [batch_size, max_len_p, embedding_size+DEP_REL_SIZE+max_len_p]
                 self.H_lookup = tf.concat([self.H_lookup, self.H_dep], axis=-1, name='H_lookup_dep') # [batch_size, max_len_h, embedding_size+DEP_REL_SIZE+max_len_h]
 
@@ -133,10 +136,10 @@ class GroundedTextualEntailmentModel(object):
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
             kp = self.keep_probability if self.options.dropout else 1
-            self.context_p = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
+            self.context_p = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
             # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-            self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
+            self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
 
     def matching_layer(self):
         with tf.name_scope('MATCHING'):
@@ -475,10 +478,10 @@ class GroundedTextualEntailmentModel(object):
                         self.writer.add_summary(eval_summ, step)
         self.writer.close()
 
-    def directional_lstm(self, input_data, num_layers, rnn_size, keep_prob):
+    def directional_lstm(self, input_data, num_layers, rnn_size, keep_prob, name):
         output = input_data
         for layer in range(num_layers):
-            with tf.variable_scope('encoder_{}'.format(layer),reuse=tf.AUTO_REUSE):
+            with tf.variable_scope('encoder_{}{}'.format(name, layer),reuse=tf.AUTO_REUSE):
                 cell_fw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
                 # cell_fw = tf.contrib.rnn.AttentionCellWrapper(cell_fw, attn_length=40, state_is_tuple=True)
                 # cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, input_keep_prob = keep_prob)
