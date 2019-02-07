@@ -100,7 +100,7 @@ def generate_datasets_with_dependency():
             lines = f.readlines()[1:]#skip header
             P_reader = csv.reader(P_f, delimiter="\t")
             H_reader = csv.reader(H_f, delimiter="\t")
-            for row in lines: #for each sentence
+            for i,row in enumerate(lines): #for each sentence
                 levels = ""
                 relations = ""
                 for P_word in P_reader: #for each word in P
