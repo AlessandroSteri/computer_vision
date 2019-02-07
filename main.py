@@ -59,7 +59,8 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_DEP", dest="with_DEP", action='store_true', help="Makes use of Dependency Tree.")
     cmdLineParser.add_argument("--dropout", dest="dropout", action='store_true', help="Applies dropout at the latent representation.")
     cmdLineParser.add_argument("--attentive", dest="attentive", action='store_true', help="Applies cross multihead attention to PI vs PI and HI vs HI.")
-    cmdLineParser.add_argument("--attentive_I", dest="attentive_I", action='store_true', help="Applies cross multihead attention to I vs P and I vs H.")    
+    cmdLineParser.add_argument("--attentive_I", dest="attentive_I", action='store_true', help="Applies cross multihead attention to I vs P and I vs H.")
+    cmdLineParser.add_argument("--attentive_my", dest="attentive_my", action='store_true', help="Applies cross my attention to PI vs HI and HI vs PI.")
     cmdLineParser.add_argument("--attentive_swap", dest="attentive_swap", action='store_true', help="Applies cross multihead attention to PI vs HI and HI vs PI.")
     options = cmdLineParser.parse_args()
     # }}}

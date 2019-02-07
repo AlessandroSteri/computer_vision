@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
-from gte.utils.tf import bilstm_layer, highway
+from gte.utils.tf import bilstm_layer, highway, attention_layer
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
@@ -72,7 +72,8 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
-        if self.options.with_matching: self.matching_layer()
+        if self.options.with_matching: self.bilateral_matching_layer()
+        else: self.matching_layer()
         self.opt_loss_layer()
         self.prediction_layer()
 
@@ -142,112 +143,7 @@ class GroundedTextualEntailmentModel(object):
             self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
 
     def matching_layer(self):
-        with tf.name_scope('MATCHING'):
-            # ========Bilateral Matching=====
-            out_image_feats = None
-            in_question_repres = self.context_p
-            in_passage_repres = self.context_h
-            in_question_dep_cons = None
-            in_passage_dep_cons = None
-            self.question_lengths = self.lengths_P
-            self.passage_lengths = self.lengths_H
-            question_mask = self.P_mask
-            mask = self.H_mask
-            MP_dim = 10
-            input_dim = 2*self.options.hidden_size
-            with_filter_layer = False
-            context_layer_num = 1
-            context_lstm_dim = self.options.hidden_size
-            is_training = True
-            dropout_rate = 0.5
-            with_match_highway = False
-            aggregation_layer_num = 1
-            aggregation_lstm_dim = 300  # self.options.hidden_size
-            highway_layer_num = 1
-            with_aggregation_highway = True
-            with_lex_decomposition = False
-            lex_decompsition_dim = -1
-            with_full_match = True
-            with_maxpool_match = True
-            with_attentive_match = True
-            with_max_attentive_match = True
-            with_left_match = True
-            with_right_match = True
-            with_dep = False
-            with_image = False
-            with_mean_aggregation = True
-            image_with_hypothesis_only = True
-            with_img_attentive_match = True
-            with_img_full_match = True
-            with_img_maxpool_match = False
-            with_img_max_attentive_match = True
-            image_context_layer = False
-            img_dim = 100
-
-            (self.match_representation, self.match_dim) = bilateral_match_func(out_image_feats,
-                                                                     in_question_repres,
-                                                                     in_passage_repres,
-                                                                     in_question_dep_cons,
-                                                                     in_passage_dep_cons,
-                                                                     self.question_lengths,
-                                                                     self.passage_lengths,
-                                                                     question_mask,
-                                                                     mask,
-                                                                     MP_dim,
-                                                                     input_dim,
-                                                                     with_filter_layer,
-                                                                     context_layer_num,
-                                                                     context_lstm_dim,
-                                                                     is_training,dropout_rate,
-                                                                     with_match_highway,
-                                                                     aggregation_layer_num,
-                                                                     aggregation_lstm_dim,
-                                                                     highway_layer_num,
-                                                                     with_aggregation_highway,
-                                                                     with_lex_decomposition,
-                                                                     lex_decompsition_dim,
-                                                                     with_full_match,
-                                                                     with_maxpool_match,
-                                                                     with_attentive_match,
-                                                                     with_max_attentive_match,
-                                                                     with_left_match,
-                                                                     with_right_match,
-                                                                     with_dep=with_dep,
-                                                                     with_image=with_image,
-                                                                     with_mean_aggregation=with_mean_aggregation,
-                                                                     image_with_hypothesis_only=image_with_hypothesis_only,
-                                                                     with_img_attentive_match=with_img_attentive_match,
-                                                                     with_img_full_match=with_img_full_match,
-                                                                     with_img_maxpool_match=with_img_maxpool_match,
-                                                                     with_img_max_attentive_match=with_img_max_attentive_match,
-                                                                     image_context_layer=image_context_layer,
-                                                                     img_dim=img_dim)
-
-            #========Prediction Layer=========
-            w_0 = tf.get_variable("w_0", [self.match_dim, self.match_dim/2], dtype=tf.float32)
-            b_0 = tf.get_variable("b_0", [self.match_dim/2], dtype=tf.float32)
-            w_1 = tf.get_variable("w_1", [self.match_dim/2, 3],dtype=tf.float32)
-            b_1 = tf.get_variable("b_1", [3],dtype=tf.float32)
-
-            logits = tf.matmul(self.match_representation, w_0) + b_0
-            self.match_logits = tf.tanh(logits)
-            self.match_logits = tf.matmul(self.match_logits, w_1) + b_1
-            self.prob = tf.nn.softmax(self.match_logits)
-            gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
-
-            clipper = 50
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
-            tvars = tf.trainable_variables()
-            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
-            self.loss = self.loss + 1e-5 * l2_loss
-            grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
-            # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
-            # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
-            # self.pred = tf.matmul(self.match_logits, W_match) + b_match
-            if self.options.with_matching: self.score = self.match_logits
-
+        pass
     def opt_loss_layer(self):
         with tf.name_scope('OPT_LOSS'):
             # if not self.options.with_matching:
@@ -256,6 +152,7 @@ class GroundedTextualEntailmentModel(object):
             L_p = self.options.max_len_p
             L_h = self.options.max_len_h
             self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
+            Img = self.I
             if self.options.with_img:
                 self.latent_repr = highway(self.latent_repr, HH, tf.nn.relu)
                 self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
@@ -272,6 +169,10 @@ class GroundedTextualEntailmentModel(object):
             if self.options.with_img2:
                 self.context_p = highway(self.context_p, HH, tf.nn.relu)
                 self.context_h = highway(self.context_h, HH, tf.nn.relu)
+                if self.options.attentive_I:
+                    self.context_p = multihead_attention(self.context_p, self.I, is_training=self.is_training, scope="P_attention")
+                    self.context_h = multihead_attention(self.context_h, self.I, is_training=self.is_training, scope="H_attention")
+                    Img = multihead_attention(self.I, self.context_h, is_training=self.is_training, scope="I_attention")
                 latent_repr_flat_p = tf.reshape(self.context_p, [B * L_p, HH], name='lrf_p')
                 latent_repr_flat_h = tf.reshape(self.context_h, [B * L_h, HH], name='lrf_h')
                 # linear map from HH to FEAT_SIZE uniwue for p and h
@@ -281,8 +182,8 @@ class GroundedTextualEntailmentModel(object):
                 latent_repr_flat_h = tf.matmul(latent_repr_flat_h, W_ph) + b_ph
                 latent_repr_flat_p = tf.reshape(latent_repr_flat_p, [B, L_p, FEAT_SIZE], name='lrf_p_3d')
                 latent_repr_flat_h = tf.reshape(latent_repr_flat_h, [B, L_h, FEAT_SIZE], name='lrf_h_3d')
-                latent_repr_flat_pi = tf.concat([self.I, latent_repr_flat_p], axis=-2, name='lrf_IP_3d') # [B, NUM_FEATS+LP, FEAT_SIZE]
-                latent_repr_flat_hi = tf.concat([self.I, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, NUM_FEATS+LH, FEAT_SIZE]
+                latent_repr_flat_pi = tf.concat([Img, latent_repr_flat_p], axis=-2, name='lrf_IP_3d') # [B, NUM_FEATS+LP, FEAT_SIZE]
+                latent_repr_flat_hi = tf.concat([Img, latent_repr_flat_h], axis=-2, name='lrf_IH_3d') # [B, NUM_FEATS+LH, FEAT_SIZE]
                 self.latent_repr_PI = highway(latent_repr_flat_pi, FEAT_SIZE, tf.nn.relu) # [B, NUM_FEATS+LP, FEAT_SIZE]
                 self.latent_repr_HI = highway(latent_repr_flat_hi, FEAT_SIZE, tf.nn.relu) # [B, NUM_FEATS+LH, FEAT_SIZE]
                 if self.options.attentive:
@@ -291,6 +192,20 @@ class GroundedTextualEntailmentModel(object):
                 if self.options.attentive_swap:
                     self.latent_repr_PI = multihead_attention(self.latent_repr_PI, self.latent_repr_HI, is_training=self.is_training, scope="PI_attention")
                     self.latent_repr_HI = multihead_attention(self.latent_repr_HI, self.latent_repr_PI, is_training=self.is_training, scope="HI_attention")
+                if self.options.attentive_my:
+                    self.latent_repr_PI = attention_layer(self.latent_repr_PI,
+                                                          tf.add(self.lengths_P, NUM_FEATS),
+                                                          batch_size = self.options.batch_size,
+                                                          time_size=NUM_FEATS+self.options.max_len_p,
+                                                          hidden_size=self.options.hidden_size,
+                                                          name="PI_my_attention")
+                    self.latent_repr_HI = attention_layer(self.latent_repr_HI,
+                                                          tf.add(self.lengths_H, NUM_FEATS),
+                                                          batch_size = self.options.batch_size,
+                                                          time_size=NUM_FEATS+self.options.max_len_h,
+                                                          hidden_size=self.options.hidden_size,
+                                                          name="HI_my_attention")
+# def attention_layer(x, sequence_length, batch_size:int, time_size:int, hidden_size:int, name:str=''):
 
                 self.latent_repr = tf.concat([latent_repr_flat_pi, latent_repr_flat_hi], axis=-2, name='latent_repr') # [B, LP+LH+NUM_FEATS, FEAT_SIZE]
                 self.latent_repr = highway(self.latent_repr, FEAT_SIZE, tf.nn.relu)
@@ -492,3 +407,110 @@ class GroundedTextualEntailmentModel(object):
                 output = tf.concat(outputs,2)
                 return output
 
+    # LOWERS TOO MUCH PERFORMANCES
+    def bilateral_matching_layer(self):
+        with tf.name_scope('MATCHING'):
+            # ========Bilateral Matching=====
+            out_image_feats = None
+            in_question_repres = self.context_p
+            in_passage_repres = self.context_h
+            in_question_dep_cons = None
+            in_passage_dep_cons = None
+            self.question_lengths = self.lengths_P
+            self.passage_lengths = self.lengths_H
+            question_mask = self.P_mask
+            mask = self.H_mask
+            MP_dim = 10
+            input_dim = 2*self.options.hidden_size
+            with_filter_layer = False
+            context_layer_num = 1
+            context_lstm_dim = self.options.hidden_size
+            is_training = True
+            dropout_rate = 0.5
+            with_match_highway = False
+            aggregation_layer_num = 1
+            aggregation_lstm_dim = 300  # self.options.hidden_size
+            highway_layer_num = 1
+            with_aggregation_highway = True
+            with_lex_decomposition = False
+            lex_decompsition_dim = -1
+            with_full_match = True
+            with_maxpool_match = True
+            with_attentive_match = True
+            with_max_attentive_match = True
+            with_left_match = True
+            with_right_match = True
+            with_dep = False
+            with_image = False
+            with_mean_aggregation = True
+            image_with_hypothesis_only = True
+            with_img_attentive_match = True
+            with_img_full_match = True
+            with_img_maxpool_match = False
+            with_img_max_attentive_match = True
+            image_context_layer = False
+            img_dim = 100
+
+            (self.match_representation, self.match_dim) = bilateral_match_func(out_image_feats,
+                                                                     in_question_repres,
+                                                                     in_passage_repres,
+                                                                     in_question_dep_cons,
+                                                                     in_passage_dep_cons,
+                                                                     self.question_lengths,
+                                                                     self.passage_lengths,
+                                                                     question_mask,
+                                                                     mask,
+                                                                     MP_dim,
+                                                                     input_dim,
+                                                                     with_filter_layer,
+                                                                     context_layer_num,
+                                                                     context_lstm_dim,
+                                                                     is_training,dropout_rate,
+                                                                     with_match_highway,
+                                                                     aggregation_layer_num,
+                                                                     aggregation_lstm_dim,
+                                                                     highway_layer_num,
+                                                                     with_aggregation_highway,
+                                                                     with_lex_decomposition,
+                                                                     lex_decompsition_dim,
+                                                                     with_full_match,
+                                                                     with_maxpool_match,
+                                                                     with_attentive_match,
+                                                                     with_max_attentive_match,
+                                                                     with_left_match,
+                                                                     with_right_match,
+                                                                     with_dep=with_dep,
+                                                                     with_image=with_image,
+                                                                     with_mean_aggregation=with_mean_aggregation,
+                                                                     image_with_hypothesis_only=image_with_hypothesis_only,
+                                                                     with_img_attentive_match=with_img_attentive_match,
+                                                                     with_img_full_match=with_img_full_match,
+                                                                     with_img_maxpool_match=with_img_maxpool_match,
+                                                                     with_img_max_attentive_match=with_img_max_attentive_match,
+                                                                     image_context_layer=image_context_layer,
+                                                                     img_dim=img_dim)
+
+            #========Prediction Layer=========
+            w_0 = tf.get_variable("w_0", [self.match_dim, self.match_dim/2], dtype=tf.float32)
+            b_0 = tf.get_variable("b_0", [self.match_dim/2], dtype=tf.float32)
+            w_1 = tf.get_variable("w_1", [self.match_dim/2, 3],dtype=tf.float32)
+            b_1 = tf.get_variable("b_1", [3],dtype=tf.float32)
+
+            logits = tf.matmul(self.match_representation, w_0) + b_0
+            self.match_logits = tf.tanh(logits)
+            self.match_logits = tf.matmul(self.match_logits, w_1) + b_1
+            self.prob = tf.nn.softmax(self.match_logits)
+            gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
+
+            clipper = 50
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+            tvars = tf.trainable_variables()
+            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+            self.loss = self.loss + 1e-5 * l2_loss
+            grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
+            # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
+            # self.pred = tf.matmul(self.match_logits, W_match) + b_match
+            if self.options.with_matching: self.score = self.match_logits
