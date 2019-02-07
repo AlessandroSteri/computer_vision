@@ -83,6 +83,10 @@ if __name__ == '__main__':
     if options.dropout: model_info += 'D.'.format()
     if options.attentive: model_info += 'A.'.format()
     if options.attentive_swap: model_info += 'Asw'.format()
+    if options.attentive_I: model_info += 'AI'.format()
+    if options.attentive_my: model_info += 'Amy'.format()
+    if options.with_DEP: model_info += 'Dep'.format()
+
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info
     # }}}

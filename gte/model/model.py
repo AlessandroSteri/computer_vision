@@ -355,7 +355,21 @@ class GroundedTextualEntailmentModel(object):
                     print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
                     print("Loss: ", loss)
                     if step != 0:
-                        if step >= 1000: # use module when is not crushing
+                        # Predict without training
+                        eval_predictions, labels = self.predict(DEV_DATA)
+                        assert len(labels) == len(eval_predictions)
+                        accuracy = sum(labels == eval_predictions)/len(labels)
+                        print("Accuracy: {}".format(accuracy))
+                        f1 = f1_score(labels, eval_predictions, average='micro')
+                        print("F1: {}".format(f1))
+                        print('--------------------------------')
+
+                        # delta = 1.1
+                        if f1 >= self.best_f1:# * delta:
+                            print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
+                            print('--------------------------------')
+                            self.store_best_f1(f1)
+                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
                             # Predict without training over test sets
                             test_predictions, test_labels = self.predict(TEST_DATA)
                             test_HARD_predictions, test_HARD_labels = self.predict(TEST_DATA_HARD)
@@ -366,23 +380,6 @@ class GroundedTextualEntailmentModel(object):
                             accuracy_test_HARD = sum(test_HARD_labels == test_HARD_predictions)/len(test_HARD_labels)
                             print("TEST Accuracy: {}".format(accuracy_test))
                             print("TEST_HARD Accuracy: {}".format(accuracy_test_HARD))
-
-
-                        # Predict without training
-                        eval_predictions, labels = self.predict(DEV_DATA)
-                        assert len(labels) == len(eval_predictions)
-                        accuracy = sum(labels == eval_predictions)/len(labels)
-                        print("Accuracy: {}".format(accuracy))
-                        f1 = f1_score(labels, eval_predictions, average='micro')
-                        print("F1: {}".format(f1))
-                        print('--------------------------------')
-
-                        delta = 1.1
-                        if f1 >= self.best_f1 * delta:
-                            print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
-                            print('--------------------------------')
-                            self.store_best_f1(f1)
-                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
 
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
