@@ -197,13 +197,13 @@ class GroundedTextualEntailmentModel(object):
                                                           tf.add(self.lengths_P, NUM_FEATS),
                                                           batch_size = self.options.batch_size,
                                                           time_size=NUM_FEATS+self.options.max_len_p,
-                                                          hidden_size=self.options.hidden_size,
+                                                          hidden_size=FEAT_SIZE,#self.options.hidden_size,
                                                           name="PI_my_attention")
                     self.latent_repr_HI = attention_layer(self.latent_repr_HI,
                                                           tf.add(self.lengths_H, NUM_FEATS),
                                                           batch_size = self.options.batch_size,
                                                           time_size=NUM_FEATS+self.options.max_len_h,
-                                                          hidden_size=self.options.hidden_size,
+                                                          hidden_size=FEAT_SIZE,#self.options.hidden_size,
                                                           name="HI_my_attention")
 # def attention_layer(x, sequence_length, batch_size:int, time_size:int, hidden_size:int, name:str=''):
 
