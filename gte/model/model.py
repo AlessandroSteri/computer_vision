@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
 from gte.utils.tf import bilstm_layer, highway
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
@@ -91,6 +91,12 @@ class GroundedTextualEntailmentModel(object):
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
+            # DEP
+            if self.options.with_DEP:
+                self.P_rel = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P_rel')  # shape [batch_size, max_len_p]
+                self.H_rel = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H_rel')  # shape [batch_size, max_len_h]
+                self.P_lv = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P_lv')  # shape [batch_size, max_len_p]
+                self.H_lv = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H_lv')  # shape [batch_size, max_len_h]
         with tf.name_scope('INPUTS_MASKS'):
             self.P_mask = tf.sequence_mask(self.lengths_P, self.options.max_len_p, dtype=tf.float32, name='P_mask')  # [batch_size, max_len_p]
             self.H_mask = tf.sequence_mask(self.lengths_H, self.options.max_len_h, dtype=tf.float32, name='H_mask')  # [batch_size, max_len_h]
@@ -107,6 +113,16 @@ class GroundedTextualEntailmentModel(object):
             # selectors
             self.P_lookup = tf.nn.embedding_lookup(embeddings, self.P, name='P_lookup')  # shape (batch_size, max_len_p, embedding_size)
             self.H_lookup = tf.nn.embedding_lookup(embeddings, self.H, name='H_lookup')  # shape (batch_size, max_len_h, embedding_size)
+            if self.options.with_DEP:
+                self.P_rel_lookup = tf.one_hot(self.P_rel, DEP_REL_SIZE, name='P_rel_lookup')  # shape (batch_size, max_len_p, DEP_REL_SIZE)
+                self.H_rel_lookup = tf.one_hot(self.H_rel, DEP_REL_SIZE, name='H_rel_lookup')  # shape (batch_size, max_len_h, DEP_REL_SIZE)
+                self.P_lv_lookup  = tf.one_hot(self.P_lv, max(self.options.max_len_p, self.options.max_len_h), name='P_lv_lookup')  # shape (batch_size, max_len, max_len_p)
+                self.H_lv_lookup  = tf.one_hot(self.H_lv, max(self.options.max_len_p, self.options.max_len_h), name='H_lv_lookup')  # shape (batch_size, max_len, max_len_h)
+                self.P_dep = tf.concat([self.P_rel_lookup, self.P_lv_lookup], axis=-1, name='P_dep') # [batch_size, max_len_p, DEP_REL_SIZE+max_len_p]
+                self.H_dep = tf.concat([self.H_rel_lookup, self.H_lv_lookup], axis=-1, name='H_dep') # [batch_size, max_len_h, DEP_REL_SIZE+max_len_h]
+
+                self.P_lookup = tf.concat([self.P_lookup, self.P_dep], axis=-1, name='P_lookup_dep') # [batch_size, max_len_p, embedding_size+DEP_REL_SIZE+max_len_p]
+                self.H_lookup = tf.concat([self.H_lookup, self.H_dep], axis=-1, name='H_lookup_dep') # [batch_size, max_len_h, embedding_size+DEP_REL_SIZE+max_len_h]
 
     def context_layer(self):
         with tf.name_scope('CONTEXT'):
@@ -119,6 +135,7 @@ class GroundedTextualEntailmentModel(object):
             kp = self.keep_probability if self.options.dropout else 1
             self.context_p = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
             self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp)
 
     def matching_layer(self):
@@ -342,6 +359,11 @@ class GroundedTextualEntailmentModel(object):
             feed_dict[self.is_training] = False
             if self.options.dropout:
                 feed_dict[self.keep_probability] = 1
+            if self.options.with_DEP:
+                feed_dict[self.P_rel] = batch.P_rel
+                feed_dict[self.P_lv] = batch.P_lv
+                feed_dict[self.H_rel] = batch.H_rel
+                feed_dict[self.H_lv] = batch.H_lv
             [p] = self.session.run([self.predict_op], feed_dict=feed_dict)
             predictions += [_ for _ in p]
             labels += [_ for _ in batch.labels]
@@ -388,6 +410,11 @@ class GroundedTextualEntailmentModel(object):
                 feed_dict[self.is_training] = True
                 if self.options.dropout:
                     feed_dict[self.keep_probability] = 0.5
+                if self.options.with_DEP:
+                    feed_dict[self.P_rel] = batch.P_rel
+                    feed_dict[self.P_lv] = batch.P_lv
+                    feed_dict[self.H_rel] = batch.H_rel
+                    feed_dict[self.H_lv] = batch.H_lv
 
                 if self.options.with_matching: print("MATCHING is not run!!")
                 result = session.run([self.optimizer,

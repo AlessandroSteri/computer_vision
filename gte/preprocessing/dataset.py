@@ -124,3 +124,17 @@ def generate_datasets_with_dependency():
 
 # def datasets_to_index(datasets, word_to_index, use_only_token=True):
 
+def datasets_to_dep_set():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
+
+    dep = set()
+    for filename in datasets:
+        with open(filename) as in_file:
+            reader = csv.reader(in_file, delimiter="\t")
+            next(reader, None) #skip header
+            for row in tqdm(reader):
+                # l = row[LABEL].strip()
+                relations_P = set(row[8].strip().split("#")[0].split('_'))
+                relations_H = set(row[8].strip().split("#")[1].split('_'))
+                dep = dep | relations_P | relations_H
+    return dep
