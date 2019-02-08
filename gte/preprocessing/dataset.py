@@ -138,3 +138,53 @@ def datasets_to_dep_set():
                 relations_H = set(row[8].strip().split("#")[1].split('_'))
                 dep = dep | relations_P | relations_H
     return dep
+
+def _load_stopwords():
+    stopwords = set()
+    filename = "/home/agostina/master/NLP/hw/NLP/hw1/stopwords_en.txt"
+    with open(filename) as f:
+        for line in f.readlines():
+            stopwords.add(line.strip())
+    return stopwords
+
+def dataset_without_stopwords():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD]
+    stopwords = _load_stopwords()
+    DEP_DIR = './DATA/vsnli/DEP'
+    NO_STOPWORDS_DIR = DEP_DIR + "/NO_STOPWORDS"
+    mkdir(NO_STOPWORDS_DIR)
+    for filename in datasets:
+        name = filename.split("/")[-1][:-4]
+        with open(filename) as in_file, open(NO_STOPWORDS_DIR + "/" + name + ".tsv", "w+") as out_file:
+            reader = csv.reader(in_file, delimiter="\t")
+            writer = csv.writer(out_file, delimiter="\t")
+            header = next(reader, None)
+            writer.writerow(header)
+            for row in reader:
+                P = row[1].strip().split()
+                H = row[2].strip().split()             
+                levels = row[7].strip().split("#")
+                P_level = levels[0].split("_")
+                H_level = levels[1].split("_")
+                relations = row[8].strip().split("#")
+                P_rel = relations[0].split("_")
+                H_rel = relations[1].split("_")
+                to_remove = []
+                for index,word in enumerate(P):
+                    if word.lower() in stopwords:
+                        to_remove += [index]
+                P = ' '.join([i for j, i in enumerate(P) if j not in to_remove])
+                P_level = '_'.join([i for j, i in enumerate(P_level) if j not in to_remove])
+                P_rel = '_'.join([i for j, i in enumerate(P_rel) if j not in to_remove])
+                to_remove = []
+                for index,word in enumerate(H):
+                    if word.lower() in stopwords:
+                        to_remove += [index]
+                H = ' '.join([i for j, i in enumerate(H) if j not in to_remove])
+                H_level = '_'.join([i for j, i in enumerate(H_level) if j not in to_remove])
+                H_rel = '_'.join([i for j, i in enumerate(H_rel) if j not in to_remove])
+                row[1] = P
+                row[2] = H
+                row[7] = P_level + "#" + H_level
+                row[8] = P_rel + "#" + H_rel
+                writer.writerow(row)
