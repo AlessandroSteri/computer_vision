@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
 from gte.utils.tf import bilstm_layer, highway, attention_layer
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
@@ -373,13 +373,19 @@ class GroundedTextualEntailmentModel(object):
                             # Predict without training over test sets
                             test_predictions, test_labels = self.predict(TEST_DATA)
                             test_HARD_predictions, test_HARD_labels = self.predict(TEST_DATA_HARD)
+                            test_demo_predictions, test_demo_labels = self.predict(TEST_DATA_DEMO)
                             assert len(test_labels) == len(test_predictions)
                             assert len(test_HARD_labels) == len(test_HARD_predictions)
+                            assert len(test_demo_labels) == len(test_demo_predictions)
                             # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                             accuracy_test = sum(test_labels == test_predictions)/len(test_labels)
                             accuracy_test_HARD = sum(test_HARD_labels == test_HARD_predictions)/len(test_HARD_labels)
+                            accuracy_test_demo = sum(test_demo_labels == test_demo_predictions)/len(test_demo_labels)
                             print("TEST Accuracy: {}".format(accuracy_test))
                             print("TEST_HARD Accuracy: {}".format(accuracy_test_HARD))
+                            print("TEST_DEMO Accuracy: {}".format(accuracy_test_demo))
+                            print("Labels: ", test_demo_labels)
+                            print("Pred: ", test_demo_predictions)
 
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
