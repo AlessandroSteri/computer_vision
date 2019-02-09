@@ -228,7 +228,7 @@ class GroundedTextualEntailmentModel(object):
 
             self.prob = tf.nn.softmax(self.score)
             gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix))
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
             clipper = 50
             optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
             tvars = tf.trainable_variables()
@@ -362,6 +362,11 @@ class GroundedTextualEntailmentModel(object):
                         print("Accuracy: {}".format(accuracy))
                         f1 = f1_score(labels, eval_predictions, average='micro')
                         print("F1: {}".format(f1))
+                        con_mat = tf.confusion_matrix(labels, eval_predictions, NUM_CLASSES)
+                        print('Confusion Matrix: \n\n', tf.Tensor.eval(con_mat,feed_dict=None, session=session))
+                        print("\ncontradiction:{}".format(self.label2id["contradiction"]))
+                        print("neutral:{}".format(self.label2id["neutral"]))
+                        print("entailment:{}".format(self.label2id["entailment"]))
                         print('--------------------------------')
 
                         # delta = 1.1
@@ -504,7 +509,7 @@ class GroundedTextualEntailmentModel(object):
             self.match_logits = tf.matmul(self.match_logits, w_1) + b_1
             self.prob = tf.nn.softmax(self.match_logits)
             gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.match_logits, labels=gold_matrix))
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.match_logits, labels=gold_matrix))
 
             clipper = 50
             optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
