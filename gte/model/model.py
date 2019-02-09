@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
-from gte.utils.tf import bilstm_layer, highway, attention_layer
+from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
@@ -72,9 +72,11 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
+        if self.options.with_top_down: self.image_top_down_attention_later()
         if self.options.with_matching: self.bilateral_matching_layer()
         else: self.matching_layer()
-        self.opt_loss_layer()
+        if not self.options.with_top_down:
+            self.opt_loss_layer()
         self.prediction_layer()
 
         self.create_evaluation_graph()
@@ -137,10 +139,94 @@ class GroundedTextualEntailmentModel(object):
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
             kp = self.keep_probability if self.options.dropout else 1
-            self.context_p = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
+            self.context_p, self.P_states = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
             # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-            self.context_h = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
+            self.context_h, self.H_states = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
+            if self.options.with_cos_PH:
+                fw_similarity = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.P_states[0][0], self.H_states[0][0]), dtype=tf.float32) #[batch_size]
+                bw_similarity = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.P_states[0][1], self.H_states[0][1]), dtype=tf.float32) #[batch_size]
+                fw_similarity = tf.expand_dims(fw_similarity, -1) #[batch_size, 1]
+                bw_similarity = tf.expand_dims(bw_similarity, -1) #[batch_size, 1]
+                self.p_h_similarity = tf.concat([fw_similarity, bw_similarity], -1) #[batch_size, 2]
+                self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
+
+    def image_top_down_attention_later(self):
+        #For each location i = 1...K in the image, the feature
+        #vector v_i is concatenated with the question embedding q
+        H_embedding = tf.concat([self.H_states[0][0], self.H_states[0][1]], 1) #[batch_size x HH]
+        feat_H = tf.map_fn(lambda i: tf.map_fn(lambda x: tf.concat([x, H_embedding[i]], 0), self.I[i]), tf.convert_to_tensor(list(range(self.options.batch_size)), dtype=tf.int32), dtype=tf.float32) #[batch_size x NUM_FEATS x (FEAT_SIZE + HH)]
+        #Passed through a non-linear layer f_a...
+        N = 512
+        W_nl = tf.get_variable("W_nl", [N, FEAT_SIZE + self.options.hidden_size * 2], dtype=tf.float32)
+        b_nl = tf.get_variable("b_nl", [N], dtype=tf.float32)
+        feat_H = tf.reshape(tf.transpose(tf.to_float(feat_H)), [FEAT_SIZE + self.options.hidden_size * 2, -1]) #[FEAT_SIZE + HH, batch_size * NUM_FEATS]
+        y_att = tf.tanh(tf.transpose(tf.matmul(W_nl, feat_H)) + b_nl) # [batch_size x NUM_FEATS, N]
+        W_nl2 = tf.get_variable("W_nl2", [N, FEAT_SIZE + self.options.hidden_size * 2], dtype=tf.float32)
+        b_nl2 = tf.get_variable("b_nl2", [N], dtype=tf.float32)
+        g_att = tf.nn.softmax(tf.transpose(tf.matmul(W_nl2, feat_H)) + b_nl2) # [batch_size x NUM_FEATS, N]
+        y = tf.multiply(y_att, g_att)  # [batch_size x NUM_FEATS, N]
+        W_a = tf.get_variable("W_a", [1, FEAT_SIZE], dtype=tf.float32)
+        a = tf.matmul(W_a, tf.transpose(y)) # [1, batch_size x NUM_FEATS]
+        #...to obtain a scalar attention weight α_{i,t}
+        alpha = tf.nn.softmax(tf.transpose(a)) # [1, batch_size x NUM_FEATS]
+        alpha = tf.reshape(alpha, [self.options.batch_size, NUM_FEATS, 1])
+        #The image features are then weighted by the normalized values and summed
+        features_att = tf.map_fn(lambda x: tf.multiply(x[1], x[0]), (self.I, alpha), dtype=alpha.dtype) #[batch_size x NUM_FEATS x FEAT_SIZE]
+        self.features_att = tf.map_fn(lambda x: tf.reduce_sum(x, 0), features_att) #[batch_size x FEAT_SIZE]
+        
+        #The representations of the question (q) and of the image (v̂) are passed through non-linear layers...
+        W_h_nl = tf.get_variable("W_h_nl", [self.options.hidden_size, self.options.hidden_size * 2], dtype=tf.float32)
+        b_h_nl = tf.get_variable("b_h_nl", [self.options.hidden_size], dtype=tf.float32)
+        y_h_att = tf.tanh(tf.transpose(tf.matmul(W_h_nl, tf.transpose(H_embedding))) + b_h_nl) # [batch_size x H]
+
+        W_h_nl2 = tf.get_variable("W_h_nl2", [self.options.hidden_size, self.options.hidden_size * 2], dtype=tf.float32)
+        b_h_nl2 = tf.get_variable("b_h_nl2", [self.options.hidden_size], dtype=tf.float32)
+        g_h_att = tf.nn.softmax(tf.transpose(tf.matmul(W_h_nl2, tf.transpose(H_embedding))) + b_h_nl2) # [batch_size x H]
+        y_h = tf.multiply(y_h_att, g_h_att)  # [batch_size x H]
+
+
+        W_I_nl = tf.get_variable("W_I_nl", [self.options.hidden_size, FEAT_SIZE], dtype=tf.float32)
+        b_I_nl = tf.get_variable("b_I_nl", [self.options.hidden_size], dtype=tf.float32)
+        y_I_att = tf.tanh(tf.transpose(tf.matmul(W_I_nl, tf.transpose(self.features_att))) + b_I_nl) # [batch_size x FEAT_SIZE]
+
+        W_I_nl2 = tf.get_variable("W_I_nl2", [self.options.hidden_size, FEAT_SIZE], dtype=tf.float32)
+        b_I_nl2 = tf.get_variable("b_I_nl2", [self.options.hidden_size], dtype=tf.float32)
+        g_I_att = tf.nn.softmax(tf.transpose(tf.matmul(W_I_nl2, tf.transpose(self.features_att))) + b_I_nl2) # [batch_size x FEAT_SIZE]
+        y_I = tf.multiply(y_I_att, g_I_att)  # [batch_size x H]
+        
+        #...and then combined with a simple Hadamard product
+        self.fusion = tf.multiply(y_h, y_I) # [batch_size x H]
+
+        #Passes the joint embedding through a non-linear layer f_o... 
+        W_fusion_nl = tf.get_variable("W_fusion_nl", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
+        b_fusion_nl = tf.get_variable("b_fusion_nl", [FEAT_SIZE / 2], dtype=tf.float32)
+        y_fusion_att = tf.tanh(tf.transpose(tf.matmul(W_fusion_nl, tf.transpose(self.fusion))) + b_fusion_nl) # [batch_size x FEAT_SIZE / 2]
+
+        W_fusion_nl2 = tf.get_variable("W_fusion_nl2", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
+        b_fusion_nl2 = tf.get_variable("b_fusion_nl2", [FEAT_SIZE / 2], dtype=tf.float32)
+        g_fusion_att = tf.nn.softmax(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
+        y_fusion = tf.multiply(y_fusion_att, g_fusion_att)  # [batch_size x FEAT_SIZE / 2]
+
+        y_fusion = highway(y_fusion, int(FEAT_SIZE / 2), tf.nn.relu)
+
+        #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
+        W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
+        self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
+        #prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
 
     def matching_layer(self):
         pass
@@ -152,7 +238,11 @@ class GroundedTextualEntailmentModel(object):
             L_p = self.options.max_len_p
             L_h = self.options.max_len_h
             self.latent_repr = tf.concat([self.context_p, self.context_h], axis=-2, name='latent_repr')
-            Img = self.I
+            if self.options.with_top_down:
+                Img = tf.expand_dims(self.features_att, axis=1)
+                NUM_FEATS = 1
+            else:
+                Img = self.I
             if self.options.with_img:
                 self.latent_repr = highway(self.latent_repr, HH, tf.nn.relu)
                 self.latent_repr_flat = tf.reshape(self.latent_repr, [B * (L_p + L_h) , HH], name='lrf')
@@ -165,7 +255,15 @@ class GroundedTextualEntailmentModel(object):
                 self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h + NUM_FEATS) * FEAT_SIZE], name='ciaociaociaociao')
                 W = tf.get_variable("w", [(L_p + L_h + NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
                 self.latent_repr_flat = tf.reshape(self.latent_repr, [B, (L_p + L_h) * HH], name='lrf')
-                W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
+                if self.options.with_cos_PH:
+                    W_cos = tf.get_variable("w_cos", [(L_p + L_h) * HH, B], dtype=tf.float32)
+                    b_cos = tf.get_variable("b_cos", [B], dtype=tf.float32)
+                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_cos) + b_cos
+                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, self.p_h_similarity)
+                    self.latent_repr_flat = highway(self.latent_repr_flat, 2, tf.nn.relu)
+                    W = tf.get_variable("w", [2, NUM_CLASSES], dtype=tf.float32)
+                else:
+                    W = tf.get_variable("w", [(L_p + L_h) * HH, NUM_CLASSES], dtype=tf.float32)
             if self.options.with_img2:
                 self.context_p = highway(self.context_p, HH, tf.nn.relu)
                 self.context_h = highway(self.context_h, HH, tf.nn.relu)
@@ -213,10 +311,17 @@ class GroundedTextualEntailmentModel(object):
                 if self.options.dropout:
                     self.latent_repr_flat = tf.nn.dropout(self.latent_repr_flat, self.keep_probability)
                 # TODO w b activation dimezzando ogni volta shape tipo while ceil..
-                W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
+                if self.options.with_cos_PH:
+                    W_cos = tf.get_variable("w_cos", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, B], dtype=tf.float32)
+                    b_cos = tf.get_variable("b_cos", [B], dtype=tf.float32)
+                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, W_cos) + b_cos
+                    self.latent_repr_flat = tf.matmul(self.latent_repr_flat, self.p_h_similarity)
+                    self.latent_repr_flat = highway(self.latent_repr_flat, 2, tf.nn.relu)
+                    W = tf.get_variable("w", [2, NUM_CLASSES], dtype=tf.float32)
+                else:
+                    W = tf.get_variable("w", [(L_p + L_h + 2*NUM_FEATS) * FEAT_SIZE, NUM_CLASSES], dtype=tf.float32)
 
             b = tf.get_variable("b", [NUM_CLASSES], dtype=tf.float32)
-
             self.score = tf.matmul(self.latent_repr_flat, W) + b
             # self.score = self.pred
 
@@ -413,7 +518,7 @@ class GroundedTextualEntailmentModel(object):
                 # cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, input_keep_prob = keep_prob)
                 outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, dtype=tf.float32, swap_memory=True)
                 output = tf.concat(outputs,2)
-                return output
+                return output, states
 
     # LOWERS TOO MUCH PERFORMANCES
     def bilateral_matching_layer(self):

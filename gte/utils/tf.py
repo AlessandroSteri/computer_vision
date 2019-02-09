@@ -66,6 +66,15 @@ def attention_layer(x, sequence_length, batch_size:int, time_size:int, hidden_si
     y = tf.reshape(y, (batch_size, time_size, hidden_size)) #SHAPE [B,T,H]
     return y, a
 
+def cosine_distance(y1,y2):
+    eps = 1e-6
+    # y1 [....,a, 1, d]
+    # y2 [....,1, b, d]
+    cosine_numerator = tf.reduce_sum(tf.multiply(y1, y2), axis=-1)
+    y1_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y1), axis=-1), eps)) 
+    y2_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y2), axis=-1), eps)) 
+    return tf.dtypes.cast(cosine_numerator / y1_norm / y2_norm, tf.float32)
+
 #TODO
 # def character_embedding(batch_size, max_sentence_len, embedding_size, char_dic):
     # pass
