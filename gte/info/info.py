@@ -25,6 +25,7 @@ IMG_DATA = './DATA/flickr30k_images'
 IMG_FEATS = './DATA/flickr30k_images/features'
 
 BEST_F1 = './log/f1.txt'
+BEST_MODEL = './log/BEST_MODEL'
 
 MAX_LEN_P = 82
 MAX_LEN_H = 62

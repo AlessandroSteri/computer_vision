@@ -69,6 +69,11 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_cos_PH", dest="with_cos_PH", action='store_true', help="Use cosine similarity between context_p and context_h.")
     cmdLineParser.add_argument("--with_top_down", dest="with_top_down", action='store_true', help="Use top down image attention.")
     cmdLineParser.add_argument("--with_P_top_down", dest="with_P_top_down", action='store_true', help="Use top down image attention for P.")
+
+    cmdLineParser.add_argument("--decay", dest="decay", action='store_true', help="Use decay for learning rate.")
+    cmdLineParser.add_argument('--decay_step', action="store", dest="decay_step", default=200, type=int, help="Every how many step decay learning rate.")
+    cmdLineParser.add_argument('--decay_rate', action="store", dest="decay_rate", default=0.90, type=float, help="Rate for learning rate decay .")
+    cmdLineParser.add_argument("--restore", dest="restore", action='store_true', help="Restore model from previous best.")
     options = cmdLineParser.parse_args()
     # }}}
 
@@ -84,19 +89,21 @@ if __name__ == '__main__':
                                                                             options.max_len_p,
                                                                             options.max_len_h,
                                                                             options.bilstm_layer)
-    if options.trainable: model_info += 'T.'.format()
-    if options.with_matching: model_info += 'M.'.format()
-    if options.with_img2 or options.with_img: model_info += 'I.'.format()
-    if options.dropout: model_info += 'D.'.format()
-    if options.attentive: model_info += 'A.'.format()
-    if options.attentive_swap: model_info += 'Asw'.format()
-    if options.attentive_I: model_info += 'AI'.format()
-    if options.attentive_my: model_info += 'Amy'.format()
-    if options.with_DEP: model_info += 'Dep'.format()
-    if options.wo_SW: model_info += '.SWlower'.format()
-    if options.with_cos_PH: model_info += '.cosPH'.format()
-    if options.with_top_down: model_info += '.topDown'.format()
-    if options.with_P_top_down: model_info += '.P_topDown'.format()
+    if options.trainable: model_info += 'T.'
+    if options.with_matching: model_info += 'M.'
+    if options.with_img2 or options.with_img: model_info += 'I.'
+    if options.dropout: model_info += 'D.'
+    if options.attentive: model_info += 'A.'
+    if options.attentive_swap: model_info += 'Asw.'
+    if options.attentive_I: model_info += 'AI.'
+    if options.attentive_my: model_info += 'Amy.'
+    if options.with_DEP: model_info += 'Dep.'
+    if options.wo_SW: model_info += 'SWlower.'
+    if options.with_cos_PH: model_info += 'cosPH.'
+    if options.with_top_down: model_info += 'topDown.'
+    if options.with_P_top_down: model_info += 'P_topDown.'
+    if options.with_P_top_down: model_info += '.Dec_{}_{}'.format(options.decay_step, options.decay_rate)
+    if options.with_P_top_down: model_info += '.Res'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info

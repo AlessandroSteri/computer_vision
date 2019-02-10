@@ -5,16 +5,18 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE, BEST_MODEL
 from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
+from gte.utils.path import mkdir
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
     def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel):
         self.options = options
+        self.learning_rate = self.options.learning_rate
         self.ID = ID
         self.embeddings = embeddings
         self.word2id = word2id
@@ -28,6 +30,7 @@ class GroundedTextualEntailmentModel(object):
         self.test_summary = []
         self.graph = self.create_graph()
         self.session = tf.Session()
+        if self.options.restore: self.restore_session()
         self.best_f1 = self.get_best_f1()
         self.img2vec = Image2vec() if options.with_img else None
 
@@ -44,7 +47,7 @@ class GroundedTextualEntailmentModel(object):
             self.session = tf.Session()
         return self.session
 
-    def restore_session(self, model_ckpt):
+    def restore_session(self, model_ckpt=os.path.join(BEST_MODEL, 'model.ckpt')):
         self.saver.restore(self.session, model_ckpt)
         print("[GTE][MODEL] Model restored from {}.".format(model_ckpt))
 
@@ -59,6 +62,11 @@ class GroundedTextualEntailmentModel(object):
 
     def create_graph(self):
         print('[GTE][MODEL]Creating graph...')
+        tensorboard_dir = os.path.join(TB_DIR, self.ID)
+        mkdir(tensorboard_dir)
+        mkdir(BEST_MODEL)
+
+        # Enable GPU
         if not self.options.use_gpu:
             os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -68,6 +76,13 @@ class GroundedTextualEntailmentModel(object):
 
         if self.options.dev_env:
             tf.set_random_seed(1)
+        if self.options.decay:
+            self.global_step = tf.Variable(0, trainable=False)
+            self.learning_rate = tf.train.exponential_decay(self.learning_rate,
+                                                            self.global_step,
+                                                            self.options.decay_step,
+                                                            self.options.decay_rate,
+                                                            staircase=True)
 
         self.input_layer()
         self.embedding_layer()
@@ -167,7 +182,7 @@ class GroundedTextualEntailmentModel(object):
 
         #For each location i = 1...K in the image, the feature
         #vector v_i is concatenated with the question embedding q
-        
+
         #H_embedding = tf.concat([self.H_states[0], self.H_states[1]], 1) #[batch_size x HH] GRU
         #H_embedding = tf.concat([self.H_states[0][0], self.H_states[0][1]], 1) #[batch_size x HH] biLSTM
         H_embedding = self.H_states #[batch_size x H] GRU one direction
@@ -254,15 +269,15 @@ class GroundedTextualEntailmentModel(object):
             g_P_att4 = tf.nn.sigmoid(tf.transpose(tf.matmul(W_P_nl4, tf.transpose(timesteps_att))) + b_P_nl4) # [batch_size x H]
             y_P4 = tf.multiply(y_P_att3, g_P_att4)  # [batch_size x H]
 
-        
+
         #...and then combined with a simple Hadamard product
         self.fusion = tf.multiply(y_h, y_I) # [batch_size x H]
 
 
         if self.options.with_P_top_down:
-            self.fusion = tf.multiply(self.fusion, y_P4) # [batch_size x H]            
+            self.fusion = tf.multiply(self.fusion, y_P4) # [batch_size x H]
 
-        #Passes the joint embedding through a non-linear layer f_o... 
+        #Passes the joint embedding through a non-linear layer f_o...
         W_fusion_nl = tf.get_variable("W_fusion_nl", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
         b_fusion_nl = tf.get_variable("b_fusion_nl", [FEAT_SIZE / 2], dtype=tf.float32)
         y_fusion_att = tf.tanh(tf.transpose(tf.matmul(W_fusion_nl, tf.transpose(self.fusion))) + b_fusion_nl) # [batch_size x FEAT_SIZE / 2]
@@ -277,7 +292,7 @@ class GroundedTextualEntailmentModel(object):
         #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
         #W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
         #self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
-        
+
         dropout_prob = 0.5
         dimension = int(FEAT_SIZE / 2) #int(FEAT_SIZE / 2 + self.options.hidden_size * 2)
 
@@ -291,12 +306,17 @@ class GroundedTextualEntailmentModel(object):
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
         self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prob, labels=gold_matrix))
         clipper = 50
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+
+
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
         tvars = tf.trainable_variables()
         l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
         self.loss = self.loss + 1e-5 * l2_loss
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-        self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
 
         loss_summ = tf.summary.scalar('loss', self.loss)
         self.train_summary.append(loss_summ)
@@ -402,18 +422,21 @@ class GroundedTextualEntailmentModel(object):
             # gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
             # self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.score, labels=gold_matrix, name='unmasked_losses')
             # self.loss = tf.reduce_mean(self.losses)
-            # self.optimizer = tf.train.AdamOptimizer(self.options.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
+            # self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss) # TODO DA QUI VIENE INDEXSLICES
 
             self.prob = tf.nn.softmax(self.score)
             gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
             self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
             clipper = 50
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
             tvars = tf.trainable_variables()
             l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
             self.loss = self.loss + 1e-5 * l2_loss
             grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            if self.options.decay:
+                self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+            else:
+                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
 
             loss_summ = tf.summary.scalar('loss', self.loss)
             self.train_summary.append(loss_summ)
@@ -437,16 +460,15 @@ class GroundedTextualEntailmentModel(object):
 
     def predict(self, DATASET):
         predictions, labels = [], []
-        for batch in tqdm(generate_batch(DATASET,
-                                         self.options.batch_size,
-                                         self.word2id,
-                                         self.label2id,
-                                         self.rel2id,
-                                         img2vec=self.img2vec,
-                                         max_len_p=self.options.max_len_p,
-                                         max_len_h=self.options.max_len_h,
-                                         with_DEP=self.options.with_DEP),
-                          total=math.ceil(LEN_DEV / self.options.batch_size)):
+        for batch in generate_batch(DATASET,
+                                    self.options.batch_size,
+                                    self.word2id,
+                                    self.label2id,
+                                    self.rel2id,
+                                    img2vec=self.img2vec,
+                                    max_len_p=self.options.max_len_p,
+                                    max_len_h=self.options.max_len_h,
+                                    with_DEP=self.options.with_DEP):
             if batch is None: break
             feed_dict = {self.P: batch.P,
                          self.H: batch.H,
@@ -464,6 +486,10 @@ class GroundedTextualEntailmentModel(object):
             [p] = self.session.run([self.predict_op], feed_dict=feed_dict)
             predictions += [_ for _ in p]
             labels += [_ for _ in batch.labels]
+
+        if self.options.decay:
+            [lr] = self.session.run([self.learning_rate])
+            print("Current Learning Rate: ", lr)
 
         return np.array(predictions), np.array(labels)
 
@@ -553,7 +579,7 @@ class GroundedTextualEntailmentModel(object):
                             print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
                             print('--------------------------------')
                             self.store_best_f1(f1)
-                            path = self.saver.save(session, os.path.join(tensorboard_dir, '{}_model.ckpt'.format(f1)))
+                            path = self.saver.save(session, os.path.join(BEST_MODEL, 'model.ckpt'))
                             # Predict without training over test sets
                             test_predictions, test_labels = self.predict(TEST_DATA)
                             test_HARD_predictions, test_HARD_labels = self.predict(TEST_DATA_HARD)
@@ -691,12 +717,15 @@ class GroundedTextualEntailmentModel(object):
             self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.match_logits, labels=gold_matrix))
 
             clipper = 50
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
             tvars = tf.trainable_variables()
             l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
             self.loss = self.loss + 1e-5 * l2_loss
             grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            if self.options.decay:
+                self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+            else:
+                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
             # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
             # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
             # self.pred = tf.matmul(self.match_logits, W_match) + b_match
