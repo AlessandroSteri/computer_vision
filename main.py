@@ -102,8 +102,8 @@ if __name__ == '__main__':
     if options.with_cos_PH: model_info += 'cosPH.'
     if options.with_top_down: model_info += 'topDown.'
     if options.with_P_top_down: model_info += 'P_topDown.'
-    if options.with_P_top_down: model_info += '.Dec_{}_{}'.format(options.decay_step, options.decay_rate)
-    if options.with_P_top_down: model_info += '.Res'
+    if options.decay: model_info += '.Dec_{}_{}'.format(options.decay_step, options.decay_rate)
+    if options.restore: model_info += '.Res'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info
