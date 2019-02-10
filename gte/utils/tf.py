@@ -75,6 +75,15 @@ def cosine_distance(y1,y2):
     y2_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y2), axis=-1), eps)) 
     return tf.dtypes.cast(cosine_numerator / y1_norm / y2_norm, tf.float32)
 
+def gated_tanh(x, output_size=None, W_plus_b=None, W_plus_b_prime=None):
+    if W_plus_b is None:
+        W_plus_b = lambda x: tf.contrib.layers.fully_connected(x, output_size, activation_fn=None)
+    if W_plus_b_prime is None:
+        W_plus_b_prime = lambda x: tf.contrib.layers.fully_connected(x, output_size, activation_fn=None)
+    y_tilde = tf.nn.tanh(W_plus_b(x))
+    g = tf.nn.sigmoid(W_plus_b_prime(x))
+    return tf.multiply(y_tilde, g)
+
 #TODO
 # def character_embedding(batch_size, max_sentence_len, embedding_size, char_dic):
     # pass

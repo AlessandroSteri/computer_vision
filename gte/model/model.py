@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE
-from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance
+from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh
 from gte.match.match_utils import bilateral_match_func
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
@@ -152,9 +152,18 @@ class GroundedTextualEntailmentModel(object):
                 self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
 
     def image_top_down_attention_later(self):
+        cell_fw = tf.contrib.rnn.GRUBlockCellV2(256)
+
+        cell_bw = tf.contrib.rnn.GRUBlockCellV2(256)
+
+        self.I = tf.nn.l2_normalize(self.I, axis=2)
+
+        outputs, self.H_states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, self.H_lookup, dtype=tf.float32, swap_memory=True)
+
         #For each location i = 1...K in the image, the feature
         #vector v_i is concatenated with the question embedding q
-        H_embedding = tf.concat([self.H_states[0][0], self.H_states[0][1]], 1) #[batch_size x HH]
+        H_embedding = tf.concat([self.H_states[0], self.H_states[1]], 1) #[batch_size x HH]
+        #H_embedding = tf.concat([self.H_states[0][0], self.H_states[0][1]], 1) #[batch_size x HH]
         feat_H = tf.map_fn(lambda i: tf.map_fn(lambda x: tf.concat([x, H_embedding[i]], 0), self.I[i]), tf.convert_to_tensor(list(range(self.options.batch_size)), dtype=tf.int32), dtype=tf.float32) #[batch_size x NUM_FEATS x (FEAT_SIZE + HH)]
         #Passed through a non-linear layer f_a...
         N = 512
@@ -164,7 +173,7 @@ class GroundedTextualEntailmentModel(object):
         y_att = tf.tanh(tf.transpose(tf.matmul(W_nl, feat_H)) + b_nl) # [batch_size x NUM_FEATS, N]
         W_nl2 = tf.get_variable("W_nl2", [N, FEAT_SIZE + self.options.hidden_size * 2], dtype=tf.float32)
         b_nl2 = tf.get_variable("b_nl2", [N], dtype=tf.float32)
-        g_att = tf.nn.softmax(tf.transpose(tf.matmul(W_nl2, feat_H)) + b_nl2) # [batch_size x NUM_FEATS, N]
+        g_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_nl2, feat_H)) + b_nl2) # [batch_size x NUM_FEATS, N]
         y = tf.multiply(y_att, g_att)  # [batch_size x NUM_FEATS, N]
         W_a = tf.get_variable("W_a", [1, FEAT_SIZE], dtype=tf.float32)
         a = tf.matmul(W_a, tf.transpose(y)) # [1, batch_size x NUM_FEATS]
@@ -182,7 +191,7 @@ class GroundedTextualEntailmentModel(object):
 
         W_h_nl2 = tf.get_variable("W_h_nl2", [self.options.hidden_size, self.options.hidden_size * 2], dtype=tf.float32)
         b_h_nl2 = tf.get_variable("b_h_nl2", [self.options.hidden_size], dtype=tf.float32)
-        g_h_att = tf.nn.softmax(tf.transpose(tf.matmul(W_h_nl2, tf.transpose(H_embedding))) + b_h_nl2) # [batch_size x H]
+        g_h_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_h_nl2, tf.transpose(H_embedding))) + b_h_nl2) # [batch_size x H]
         y_h = tf.multiply(y_h_att, g_h_att)  # [batch_size x H]
 
 
@@ -192,7 +201,7 @@ class GroundedTextualEntailmentModel(object):
 
         W_I_nl2 = tf.get_variable("W_I_nl2", [self.options.hidden_size, FEAT_SIZE], dtype=tf.float32)
         b_I_nl2 = tf.get_variable("b_I_nl2", [self.options.hidden_size], dtype=tf.float32)
-        g_I_att = tf.nn.softmax(tf.transpose(tf.matmul(W_I_nl2, tf.transpose(self.features_att))) + b_I_nl2) # [batch_size x FEAT_SIZE]
+        g_I_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_I_nl2, tf.transpose(self.features_att))) + b_I_nl2) # [batch_size x FEAT_SIZE]
         y_I = tf.multiply(y_I_att, g_I_att)  # [batch_size x H]
         
         #...and then combined with a simple Hadamard product
@@ -205,17 +214,22 @@ class GroundedTextualEntailmentModel(object):
 
         W_fusion_nl2 = tf.get_variable("W_fusion_nl2", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
         b_fusion_nl2 = tf.get_variable("b_fusion_nl2", [FEAT_SIZE / 2], dtype=tf.float32)
-        g_fusion_att = tf.nn.softmax(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
+        g_fusion_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
         y_fusion = tf.multiply(y_fusion_att, g_fusion_att)  # [batch_size x FEAT_SIZE / 2]
 
-        y_fusion = highway(y_fusion, int(FEAT_SIZE / 2), tf.nn.relu)
-
         #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
-        W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
-        self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
-        #prob = tf.nn.softmax(self.score)
+        #W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
+        #self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
+        
+        gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, int(FEAT_SIZE / 2)), keep_prob=0.5)
+        gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, int(FEAT_SIZE / 2)), keep_prob=0.5)
+        gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, int(FEAT_SIZE / 2)), keep_prob=0.5)
+
+        self.score = tf.contrib.layers.fully_connected(gated_third_layer, NUM_CLASSES, activation_fn=None)
+
+        prob = tf.nn.softmax(self.score)
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
-        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prob, labels=gold_matrix))
         clipper = 50
         optimizer = tf.train.AdamOptimizer(learning_rate=self.options.learning_rate)
         tvars = tf.trainable_variables()
@@ -226,7 +240,6 @@ class GroundedTextualEntailmentModel(object):
 
         loss_summ = tf.summary.scalar('loss', self.loss)
         self.train_summary.append(loss_summ)
-
 
     def matching_layer(self):
         pass
