@@ -156,7 +156,7 @@ class GroundedTextualEntailmentModel(object):
 
         cell_bw = tf.contrib.rnn.GRUBlockCellV2(256)
 
-        self.I = tf.nn.l2_normalize(self.I, axis=2)
+        #self.I = tf.nn.l2_normalize(self.I, axis=2)
 
         outputs, self.H_states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, self.H_lookup, dtype=tf.float32, swap_memory=True)
 
@@ -221,9 +221,11 @@ class GroundedTextualEntailmentModel(object):
         #W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
         #self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
         
-        gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, int(FEAT_SIZE / 2)), keep_prob=0.5)
-        gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, int(FEAT_SIZE / 2)), keep_prob=0.5)
-        gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, int(FEAT_SIZE / 2)), keep_prob=0.5)
+        dropout_prob = 0.5
+
+        gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, int(FEAT_SIZE / 2)), keep_prob=dropout_prob)
+        gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, int(FEAT_SIZE / 2)), keep_prob=dropout_prob)
+        gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, int(FEAT_SIZE / 2)), keep_prob=dropout_prob)
 
         self.score = tf.contrib.layers.fully_connected(gated_third_layer, NUM_CLASSES, activation_fn=None)
 
@@ -362,6 +364,7 @@ class GroundedTextualEntailmentModel(object):
         with tf.name_scope('PREDICTION'):
             self.softmax_score = tf.nn.softmax(self.score, name='softmax_score')
             self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
+            #conf_mat = tf.confusion_matrix(self.labels, self.predict_op, NUM_CLASSES)
 
     def create_evaluation_graph(self):
         with tf.name_scope('eval'):
@@ -415,6 +418,9 @@ class GroundedTextualEntailmentModel(object):
         # init variables
         session.run(tf.global_variables_initializer())
         session.run(tf.local_variables_initializer())
+        train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop? YESSSSS!!!!!
+        eval_summary = tf.summary.merge(self.eval_summary)
+        tf.get_default_graph().finalize()
         step = -1
         for _epoch in range(self.options.epoch):
             epoch = _epoch + 1
@@ -432,11 +438,10 @@ class GroundedTextualEntailmentModel(object):
                                          total=math.ceil(LEN_TRAIN / self.options.batch_size)):
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                 if batch is None:
-                    print("End of eval.")
+                    print("End of epoch.")
                     break
                 step += 1
                 run_metadata = tf.RunMetadata()
-                train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop?
                 feed_dict = {self.P: batch.P,
                              self.H: batch.H,
                              self.I: batch.I,
@@ -480,8 +485,6 @@ class GroundedTextualEntailmentModel(object):
                         print("Accuracy: {}".format(accuracy))
                         f1 = f1_score(labels, eval_predictions, average='micro')
                         print("F1: {}".format(f1))
-                        con_mat = tf.confusion_matrix(labels, eval_predictions, NUM_CLASSES)
-                        print('Confusion Matrix: \n\n', tf.Tensor.eval(con_mat,feed_dict=None, session=session))
                         print("\ncontradiction:{}".format(self.label2id["contradiction"]))
                         print("neutral:{}".format(self.label2id["neutral"]))
                         print("entailment:{}".format(self.label2id["entailment"]))
@@ -513,7 +516,7 @@ class GroundedTextualEntailmentModel(object):
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
 
-                        eval_summary = tf.summary.merge(self.eval_summary)
+                        #eval_summary = tf.summary.merge(self.eval_summary)
                         eval_summ = session.run(eval_summary,
                                                 feed_dict=feed_dictionary)
                         self.writer.add_summary(eval_summ, step)
