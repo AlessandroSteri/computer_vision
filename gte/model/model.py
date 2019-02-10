@@ -57,6 +57,7 @@ class GroundedTextualEntailmentModel(object):
             return float(f.readline())
 
     def store_best_f1(self, f1):
+        self.best_f1 = f1
         with open(BEST_F1, 'w') as f:
             f.write('{}'.format(f1))
 
