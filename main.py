@@ -68,6 +68,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--attentive_swap", dest="attentive_swap", action='store_true', help="Applies cross multihead attention to PI vs HI and HI vs PI.")
     cmdLineParser.add_argument("--with_cos_PH", dest="with_cos_PH", action='store_true', help="Use cosine similarity between context_p and context_h.")
     cmdLineParser.add_argument("--with_top_down", dest="with_top_down", action='store_true', help="Use top down image attention.")
+    cmdLineParser.add_argument("--with_P_top_down", dest="with_P_top_down", action='store_true', help="Use top down image attention for P.")
     options = cmdLineParser.parse_args()
     # }}}
 
@@ -95,6 +96,7 @@ if __name__ == '__main__':
     if options.wo_SW: model_info += '.SWlower'.format()
     if options.with_cos_PH: model_info += '.cosPH'.format()
     if options.with_top_down: model_info += '.topDown'.format()
+    if options.with_P_top_down: model_info += '.P_topDown'.format()
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info
