@@ -239,7 +239,7 @@ class GroundedTextualEntailmentModel(object):
         N = 512
         W_nl = tf.get_variable("W_nl", [N, FEAT_SIZE + HH], dtype=tf.float32)
         b_nl = tf.get_variable("b_nl", [N], dtype=tf.float32)
-        feat_H = tf.reshape(tf.transpose(tf.to_float(feat_H)), [FEAT_SIZE + HH, -1]) #[FEAT_SIZE + HH, batch_size * NUM_FEATS]
+        feat_H = tf.reshape(tf.transpose(tf.to_float(feat_H), perm=[2,0,1]), [FEAT_SIZE + HH, -1]) #[FEAT_SIZE + HH, batch_size * NUM_FEATS]
         y_att = tf.tanh(tf.transpose(tf.matmul(W_nl, feat_H)) + b_nl) # [batch_size x NUM_FEATS, N]
         W_nl2 = tf.get_variable("W_nl2", [N, FEAT_SIZE + HH], dtype=tf.float32)
         b_nl2 = tf.get_variable("b_nl2", [N], dtype=tf.float32)
@@ -268,7 +268,7 @@ class GroundedTextualEntailmentModel(object):
             timesteps_H = tf.map_fn(lambda i: tf.map_fn(lambda x: tf.concat([x, H_embedding[i]], 0), output[i]), tf.convert_to_tensor(list(range(self.options.batch_size)), dtype=tf.int32), dtype=tf.float32) #[batch_size x LP x (2 hidden + HH)]
             W_P_nl = tf.get_variable("W_P_nl", [N, P_dim + HH], dtype=tf.float32)
             b_P_nl = tf.get_variable("b_P_nl", [N], dtype=tf.float32)
-            timesteps_H = tf.reshape(tf.transpose(tf.to_float(timesteps_H)), [P_dim + HH, -1]) #[2 * hidden_size + HH, batch_size * NUM_FEATS]
+            timesteps_H = tf.reshape(tf.transpose(tf.to_float(timesteps_H), perm=[2,0,1]), [P_dim + HH, -1]) #[2 * hidden_size + HH, batch_size * NUM_FEATS]
             y_P_att = tf.tanh(tf.transpose(tf.matmul(W_P_nl, timesteps_H)) + b_P_nl) # [batch_size x LP, N]
             W_P_nl2 = tf.get_variable("W_P_nl2", [N, P_dim + HH], dtype=tf.float32)
             b_P_nl2 = tf.get_variable("b_P_nl2", [N], dtype=tf.float32)
