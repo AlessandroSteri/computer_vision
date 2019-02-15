@@ -88,11 +88,12 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
-        if self.options.with_top_down: self.image_top_down_attention_later()
-        if self.options.with_matching: self.bilateral_matching_layer()
-        else: self.matching_layer()
-        if not self.options.with_top_down:
-            self.opt_loss_layer()
+        self.seqence_matching(self.options.hidden_size)
+        # if self.options.with_top_down: self.image_top_down_attention_later()
+        # if self.options.with_matching: self.bilateral_matching_layer()
+        # else: self.matching_layer()
+        # if not self.options.with_top_down:
+        #     self.opt_loss_layer()
         self.prediction_layer()
 
         self.create_evaluation_graph()
@@ -141,8 +142,8 @@ class GroundedTextualEntailmentModel(object):
                 self.H_dep = tf.concat([self.H_rel_lookup, self.H_lv_lookup], axis=-1, name='H_dep') # [batch_size, max_len_h, DEP_REL_SIZE+max_len_h]
 
                 kp = self.keep_probability if self.options.dropout else 1
-                self.P_dep = self.directional_lstm(self.P_dep, 1, 20, kp, name='DEP')
-                self.H_dep = self.directional_lstm(self.H_dep, 1, 20, kp, name='DEP')
+                self.P_dep = self.directional_lstm(self.P_dep, self.lengths_P, 1, 20, kp, name='DEP')
+                self.H_dep = self.directional_lstm(self.H_dep, self.lengths_H, 1, 20, kp, name='DEP')
                 self.P_lookup = tf.concat([self.P_lookup, self.P_dep], axis=-1, name='P_lookup_dep') # [batch_size, max_len_p, embedding_size+DEP_REL_SIZE+max_len_p]
                 self.H_lookup = tf.concat([self.H_lookup, self.H_dep], axis=-1, name='H_lookup_dep') # [batch_size, max_len_h, embedding_size+DEP_REL_SIZE+max_len_h]
 
@@ -155,10 +156,10 @@ class GroundedTextualEntailmentModel(object):
             L_h = self.options.max_len_h
             # self.context_p = bilstm_layer(self.P_lookup, self.lengths_P, self.options.hidden_size, name='BILSTM_P')
             kp = self.keep_probability if self.options.dropout else 1
-            self.context_p, self.P_states = self.directional_lstm(self.P_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
+            self.context_p, self.P_states = self.directional_lstm(self.P_lookup, self.lengths_P, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
             # self.context_h = bilstm_layer(self.H_lookup, self.lengths_H, self.options.hidden_size, name='BILSTM_H')
             # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
-            self.context_h, self.H_states = self.directional_lstm(self.H_lookup, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
+            self.context_h, self.H_states = self.directional_lstm(self.H_lookup, self.lengths_H, self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
             if self.options.with_cos_PH:
                 fw_similarity = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.P_states[0][0], self.H_states[0][0]), dtype=tf.float32) #[batch_size]
                 bw_similarity = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.P_states[0][1], self.H_states[0][1]), dtype=tf.float32) #[batch_size]
@@ -167,7 +168,51 @@ class GroundedTextualEntailmentModel(object):
                 self.p_h_similarity = tf.concat([fw_similarity, bw_similarity], -1) #[batch_size, 2]
                 self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
 
+    def seqence_matching(self, n):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # p_shape = tf.shape(p)
+        # q_shape = tf.shape(q)
+        # p = tf.reshape(p, (-1, 2*self.options.hidden_size))
+        # q = tf.reshape(q, (-1, 2*self.options.hidden_size))
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
     def image_top_down_attention_later(self):
+        import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         cell_fw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="fw_cells_H")
         cell_bw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="bw_cells_H")
 
@@ -324,6 +369,7 @@ class GroundedTextualEntailmentModel(object):
 
     def matching_layer(self):
         pass
+
     def opt_loss_layer(self):
         with tf.name_scope('OPT_LOSS'):
             # if not self.options.with_matching:
@@ -607,7 +653,7 @@ class GroundedTextualEntailmentModel(object):
                         self.writer.add_summary(eval_summ, step)
         self.writer.close()
 
-    def directional_lstm(self, input_data, num_layers, rnn_size, keep_prob, name):
+    def directional_lstm(self, input_data, sequence_length, num_layers, rnn_size, keep_prob, name):
         output = input_data
         for layer in range(num_layers):
             with tf.variable_scope('encoder_{}{}'.format(name, layer),reuse=tf.AUTO_REUSE):
@@ -617,7 +663,7 @@ class GroundedTextualEntailmentModel(object):
                 cell_bw = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.truncated_normal_initializer(-0.1, 0.1))
                 # cell_bw = tf.contrib.rnn.AttentionCellWrapper(cell_bw, attn_length=40, state_is_tuple=True)
                 # cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, input_keep_prob = keep_prob)
-                outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, dtype=tf.float32, swap_memory=True)
+                outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, sequence_length=sequence_length, dtype=tf.float32, swap_memory=True)
                 output = tf.concat(outputs,2)
                 return output, states
 
