@@ -89,12 +89,15 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
         #self.sequence_matching(self.options.hidden_size)
-        self.sequence_matching_with_top_down(self.options.hidden_size)
+        
+        #self.sequence_matching_with_top_down(self.options.hidden_size)
+        
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
         # if not self.options.with_top_down:
         #     self.opt_loss_layer()
+        self.relation_networks_ranker()
         self.prediction_layer()
 
         self.create_evaluation_graph()
@@ -267,6 +270,13 @@ class GroundedTextualEntailmentModel(object):
         self.train_summary.append(loss_summ)
 
     def sequence_matching_with_top_down(self, n):
+        from gte.images.deep_learning_models import VGG16
+        from keras.models import Model
+        from keras.layers import Flatten
+        from keras.layers import Dense
+        from keras.layers import Input
+        from keras.utils.data_utils import get_file
+        WEIGHTS_PATH = 'https://github.com/fchollet/deep-learning-models/releases/download/v0.1/vgg16_weights_tf_dim_ordering_tf_kernels.h5'
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
@@ -319,10 +329,15 @@ class GroundedTextualEntailmentModel(object):
 
 
         #Map I to word-world
-        W_feats = tf.get_variable("W_feats", [FEAT_SIZE, 2 * self.options.hidden_size], dtype=tf.float32)
+        self.features_att = tf.map_fn(lambda x: tf.tile(x, tf.constant([NUM_FEATS])), self.features_att, dtype=self.features_att.dtype) #[batch_size, NUM_FEATS x FEAT_SIZE]
+        keras_input = Input(tensor=self.features_att)
+        mapping_in = Dense(4096, activation='relu', name='fc1')(keras_input)
+        mapping_out = Dense(4096, activation='relu', name='fc2')(mapping_in) #[batch_size, NUM_FEATS x FEAT_SIZE]
+        model = Model(keras_input, mapping_out, name='vgg16')
+        model.load_weights("/home/agostina/.keras/models/vgg16_weights_tf_dim_ordering_tf_kernels.h5", by_name=True)
+        W_feats = tf.get_variable("W_feats", [4096, 2 * self.options.hidden_size], dtype=tf.float32)
         b_feats = tf.get_variable("b_feats", [2 * self.options.hidden_size], dtype=tf.float32)
-        I2word = tf.matmul(self.features_att, W_feats) + b_feats
-
+        I2word = tf.matmul(mapping_out, W_feats) + b_feats #[batch_size x HH]
 
         #Repeat with H and I2word
         q = tf.squeeze(q)  # [B, 2*H]
@@ -334,16 +349,64 @@ class GroundedTextualEntailmentModel(object):
         q_mul_I = tf.expand_dims(q_mul_I, axis=1)
         x_cl_I = tf.concat([I2word, q, q_sub_I, q_mul_I], 1)  # [B, 4, HH] #TODO add max e min pointwise
         x_cl_I_flat = tf.reshape(x_cl_I, (self.options.batch_size*4, 2*self.options.hidden_size))
-        W_z_I= tf.get_variable("W_z_I", [n, 2*self.options.hidden_size], dtype=tf.float32)
-        b_z_I = tf.get_variable("b_z_I", [n], dtype=tf.float32)
-        z_I = tf.transpose(tf.matmul(W_z_I, tf.transpose(x_cl_I_flat))) + b_z_I
+        z_I = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_I_flat))) + b_z
         z_I = tf.reshape(z_I, (self.options.batch_size, -1))
-        W_score_I = tf.get_variable("W_score_I", [NUM_CLASSES, 4*n], dtype=tf.float32)
-        b_score_I = tf.get_variable("b_score_I", [NUM_CLASSES], dtype=tf.float32)
         # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
-        self.score_I = tf.transpose(tf.matmul(W_score_I, tf.transpose(tf.nn.relu(z_I)))) + b_score_I
+        self.score_I = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z_I)))) + b_score
 
         self.score = tf.multiply(self.score, self.score_I)
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
+    def relation_networks_ranker(self):
+        words_combination = tf.map_fn(lambda i: tf.map_fn(lambda y: tf.map_fn(lambda x: tf.concat([y, x], 0), self.P_lookup[i]), self.H_lookup[i]), tf.range(self.options.batch_size), dtype=tf.float32)  #[batch_size, MAX_LEN_H, MAX_LEN_P, 2 * emb_size]
+        words_combination_flat = tf.reshape(words_combination, [-1, 2 * self.options.embedding_size])  #[batch_size* MAX_LEN_H * MAX_LEN_P, 2 * emb_size]
+
+        dim = 512
+        W_ff_1 = tf.get_variable("W_ff_1", [2 * self.options.embedding_size, dim], dtype=tf.float32)
+        b_ff_1 = tf.get_variable("b_ff_1", [dim], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_1) + b_ff_1)  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim]
+
+        W_ff_2 = tf.get_variable("W_ff_2", [dim, dim / 2], dtype=tf.float32)
+        b_ff_2 = tf.get_variable("b_ff_2", [dim / 2], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_2) + b_ff_2)  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim / 2]
+
+        W_ff_3 = tf.get_variable("W_ff_3", [dim / 2, dim / 4], dtype=tf.float32)
+        b_ff_3 = tf.get_variable("b_ff_3", [dim / 4], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_3) + b_ff_3)  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim / 4]
+
+        words_combination_flat = tf.reshape(words_combination_flat, [self.options.batch_size, -1, int(dim / 4)])
+        words_combination_flat = tf.reduce_sum(words_combination_flat, axis=1) #[batch_size, dim / 4]
+
+        W_ff_4 = tf.get_variable("W_ff_4", [dim / 4, dim / 8], dtype=tf.float32)
+        b_ff_4 = tf.get_variable("b_ff_4", [dim / 8], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_4) + b_ff_4)  #[batch_size, dim / 8]
+
+        W_ff_5 = tf.get_variable("W_ff_5", [dim / 8, dim / 16], dtype=tf.float32)
+        b_ff_5 = tf.get_variable("b_ff_5", [dim / 16], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_5) + b_ff_5)  #[batch_size, dim / 16]
+
+        W_ff_6 = tf.get_variable("W_ff_6", [dim / 16, NUM_CLASSES], dtype=tf.float32)
+        b_ff_6 = tf.get_variable("b_ff_6", [NUM_CLASSES], dtype=tf.float32)
+        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_6) + b_ff_6)  #[batch_size, NUM_CLASSES]
+
+        self.score = words_combination_flat
 
         self.prob = tf.nn.softmax(self.score)
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
