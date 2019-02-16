@@ -88,8 +88,8 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
-        #self.seqence_matching(self.options.hidden_size)
-        self.seqence_matching_with_top_down(self.options.hidden_size)
+        #self.sequence_matching(self.options.hidden_size)
+        self.sequence_matching_with_top_down(self.options.hidden_size)
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
@@ -169,7 +169,7 @@ class GroundedTextualEntailmentModel(object):
                 self.p_h_similarity = tf.concat([fw_similarity, bw_similarity], -1) #[batch_size, 2]
                 self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
 
-    def seqence_matching(self, n):
+    def sequence_matching(self, n):
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
@@ -211,8 +211,62 @@ class GroundedTextualEntailmentModel(object):
         loss_summ = tf.summary.scalar('loss', self.loss)
         self.train_summary.append(loss_summ)
 
+    # parte random ma dopo impara e lente si assesta come sequence_matching
+    def sequence_img_matching(self, n):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        kp = self.keep_probability if self.options.dropout else 1
+        # or try all the timestamps to 2hh
+        self.context_I, self.I_states = self.directional_lstm(self.I, [NUM_FEATS for _ in range(self.options.batch_size)], self.options.bilstm_layer, self.options.hidden_size, kp, name='context')
 
-    def seqence_matching_with_top_down(self, n):
+        p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        i = tf.concat([self.I_states[0][0], self.I_states[0][1]], -1)  # [B, 2*H]
+
+        # P H
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        # H I
+        i_sub_h = q - i  # TODO try with module
+        i_mul_h = tf.multiply(q , i)
+
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        i = tf.expand_dims(i, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        i_sub_h = tf.expand_dims(i_sub_h, axis=1)
+        i_mul_h = tf.expand_dims(i_mul_h, axis=1)
+
+
+        x_cl = tf.concat([p, q, i, q_sub_p, q_mul_p, i_sub_h, i_mul_h], 1)  # [B, 7, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*7, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 7*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+    def sequence_matching_with_top_down(self, n):
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
