@@ -90,14 +90,14 @@ class GroundedTextualEntailmentModel(object):
         self.context_layer()
         #self.sequence_matching(self.options.hidden_size)
         
-        #self.sequence_matching_with_top_down(self.options.hidden_size)
+        self.sequence_matching_with_top_down(self.options.hidden_size)
         
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
         # if not self.options.with_top_down:
         #     self.opt_loss_layer()
-        self.relation_networks_ranker()
+        #self.relation_networks_ranker()
         self.prediction_layer()
 
         self.create_evaluation_graph()
