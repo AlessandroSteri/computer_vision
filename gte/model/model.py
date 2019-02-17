@@ -48,7 +48,9 @@ class GroundedTextualEntailmentModel(object):
         return self.session
 
     def restore_session(self, model_ckpt=os.path.join(BEST_MODEL, 'model.ckpt')):
-        self.saver.restore(self.session, model_ckpt)
+        tf.reset_default_graph()
+        loader = tf.train.import_meta_graph(model_ckpt+'.meta')
+        loader.restore(self.session, model_ckpt)
         print("[GTE][MODEL] Model restored from {}.".format(model_ckpt))
 
     def get_best_f1(self):
@@ -761,9 +763,12 @@ class GroundedTextualEntailmentModel(object):
         # with tf.Session() as session:
         session = self.session
         self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
+        
         # init variables
-        session.run(tf.global_variables_initializer())
-        session.run(tf.local_variables_initializer())
+        if not self.options.restore:
+            session.run(tf.global_variables_initializer())
+            session.run(tf.local_variables_initializer())
+        
         train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop? YESSSSS!!!!!
         eval_summary = tf.summary.merge(self.eval_summary)
         tf.get_default_graph().finalize()
@@ -845,19 +850,19 @@ class GroundedTextualEntailmentModel(object):
                             # Predict without training over test sets
                             test_predictions, test_labels = self.predict(TEST_DATA)
                             test_HARD_predictions, test_HARD_labels = self.predict(TEST_DATA_HARD)
-                            test_demo_predictions, test_demo_labels = self.predict(TEST_DATA_DEMO)
+                            #test_demo_predictions, test_demo_labels = self.predict(TEST_DATA_DEMO)
                             assert len(test_labels) == len(test_predictions)
                             assert len(test_HARD_labels) == len(test_HARD_predictions)
-                            assert len(test_demo_labels) == len(test_demo_predictions)
+                            #assert len(test_demo_labels) == len(test_demo_predictions)
                             # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                             accuracy_test = sum(test_labels == test_predictions)/len(test_labels)
                             accuracy_test_HARD = sum(test_HARD_labels == test_HARD_predictions)/len(test_HARD_labels)
-                            accuracy_test_demo = sum(test_demo_labels == test_demo_predictions)/len(test_demo_labels)
+                            #accuracy_test_demo = sum(test_demo_labels == test_demo_predictions)/len(test_demo_labels)
                             print("TEST Accuracy: {}".format(accuracy_test))
                             print("TEST_HARD Accuracy: {}".format(accuracy_test_HARD))
-                            print("TEST_DEMO Accuracy: {}".format(accuracy_test_demo))
-                            print("Labels: ", test_demo_labels)
-                            print("Pred: ", test_demo_predictions)
+                            #print("TEST_DEMO Accuracy: {}".format(accuracy_test_demo))
+                            #print("Labels: ", test_demo_labels)
+                            #print("Pred: ", test_demo_predictions)
 
                         feed_dictionary = {self.accuracy: accuracy,
                                            self.f1: f1}
