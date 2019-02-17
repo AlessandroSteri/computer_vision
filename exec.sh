@@ -1,1 +1,1 @@
-time python3 main.py --step_check=500 --max_len_p=40 --max_len_h=27 --dev_env --trainable --with_top_down --with_P_top_down --learning_rate 0.0001 --epoch 3 # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2
+time python3 main.py --gpu --step_check=500 --max_len_p=40 --max_len_h=27 --dev_env --trainable --with_top_down --with_P_top_down --learning_rate 0.0001 --epoch 300 # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2
