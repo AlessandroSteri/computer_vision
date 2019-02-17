@@ -92,14 +92,14 @@ class GroundedTextualEntailmentModel(object):
         self.context_layer()
         #self.sequence_matching(self.options.hidden_size)
         
-        self.sequence_matching_with_top_down(self.options.hidden_size)
+        #self.sequence_matching_with_top_down(self.options.hidden_size)
         
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
         # if not self.options.with_top_down:
         #     self.opt_loss_layer()
-        #self.relation_networks_ranker()
+        self.relation_networks_ranker()
         self.prediction_layer()
 
         self.create_evaluation_graph()
@@ -383,11 +383,11 @@ class GroundedTextualEntailmentModel(object):
         dim = 512
         W_ff_1 = tf.get_variable("W_ff_1", [2 * self.options.embedding_size, dim], dtype=tf.float32)
         b_ff_1 = tf.get_variable("b_ff_1", [dim], dtype=tf.float32)
-        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_1) + b_ff_1)  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim]
+        words_combination_flat = tf.matmul(words_combination_flat, W_ff_1) + b_ff_1  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim]
 
         W_ff_2 = tf.get_variable("W_ff_2", [dim, dim / 2], dtype=tf.float32)
         b_ff_2 = tf.get_variable("b_ff_2", [dim / 2], dtype=tf.float32)
-        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_2) + b_ff_2)  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim / 2]
+        words_combination_flat = tf.matmul(words_combination_flat, W_ff_2) + b_ff_2  #[batch_size* MAX_LEN_H * MAX_LEN_P, dim / 2]
 
         W_ff_3 = tf.get_variable("W_ff_3", [dim / 2, dim / 4], dtype=tf.float32)
         b_ff_3 = tf.get_variable("b_ff_3", [dim / 4], dtype=tf.float32)
@@ -398,11 +398,11 @@ class GroundedTextualEntailmentModel(object):
 
         W_ff_4 = tf.get_variable("W_ff_4", [dim / 4, dim / 8], dtype=tf.float32)
         b_ff_4 = tf.get_variable("b_ff_4", [dim / 8], dtype=tf.float32)
-        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_4) + b_ff_4)  #[batch_size, dim / 8]
+        words_combination_flat = tf.matmul(words_combination_flat, W_ff_4) + b_ff_4  #[batch_size, dim / 8]
 
         W_ff_5 = tf.get_variable("W_ff_5", [dim / 8, dim / 16], dtype=tf.float32)
         b_ff_5 = tf.get_variable("b_ff_5", [dim / 16], dtype=tf.float32)
-        words_combination_flat = tf.nn.relu(tf.matmul(words_combination_flat, W_ff_5) + b_ff_5)  #[batch_size, dim / 16]
+        words_combination_flat = tf.matmul(words_combination_flat, W_ff_5) + b_ff_5  #[batch_size, dim / 16]
 
         W_ff_6 = tf.get_variable("W_ff_6", [dim / 16, NUM_CLASSES], dtype=tf.float32)
         b_ff_6 = tf.get_variable("b_ff_6", [NUM_CLASSES], dtype=tf.float32)
