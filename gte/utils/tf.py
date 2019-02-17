@@ -71,9 +71,9 @@ def cosine_distance(y1,y2):
     # y1 [....,a, 1, d]
     # y2 [....,1, b, d]
     cosine_numerator = tf.reduce_sum(tf.multiply(y1, y2), axis=-1)
-    y1_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y1), axis=-1), eps)) 
-    y2_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y2), axis=-1), eps)) 
-    return tf.dtypes.cast(cosine_numerator / y1_norm / y2_norm, tf.float32)
+    y1_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y1), axis=-1), eps))
+    y2_norm = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(y2), axis=-1), eps))
+    return tf.cast(cosine_numerator / y1_norm / y2_norm, tf.float32)
 
 def gated_tanh(x, output_size=None, W_plus_b=None, W_plus_b_prime=None):
     if W_plus_b is None:

@@ -91,15 +91,15 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
         #self.sequence_matching(self.options.hidden_size)
-        
+
         #self.sequence_matching_with_top_down(self.options.hidden_size)
-        
+
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
         # if not self.options.with_top_down:
         #     self.opt_loss_layer()
-        
+
         #self.relation_networks_ranker()
 
         self.sequence_matching_with_top_down_multi_learning(self.options.hidden_size)
@@ -541,7 +541,7 @@ class GroundedTextualEntailmentModel(object):
         timesteps_att = tf.map_fn(lambda x: tf.reduce_sum(x, 0), timesteps_att) #[batch_size, 2 x hidden]
 
 
-        sum_distances = tf.dtypes.cast(tf.reduce_sum(tf.map_fn(lambda x: cosine_distance(x[0], x[1]), (I2word, timesteps_att), dtype=tf.float32), 0), tf.float32)
+        sum_distances = tf.cast(tf.reduce_sum(tf.map_fn(lambda x: cosine_distance(x[0], x[1]), (I2word, timesteps_att), dtype=tf.float32), 0), tf.float32)
         self.loss += sum_distances
 
 
@@ -890,12 +890,12 @@ class GroundedTextualEntailmentModel(object):
         # with tf.Session() as session:
         session = self.session
         self.writer = tf.summary.FileWriter(tensorboard_dir, session.graph)
-        
+
         # init variables
         if not self.options.restore:
             session.run(tf.global_variables_initializer())
             session.run(tf.local_variables_initializer())
-        
+
         train_summary = tf.summary.merge(self.train_summary) # TODO should be outside loop? YESSSSS!!!!!
         eval_summary = tf.summary.merge(self.eval_summary)
         tf.get_default_graph().finalize()
@@ -1012,7 +1012,7 @@ class GroundedTextualEntailmentModel(object):
                 # cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, input_keep_prob = keep_prob)
                 outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, output, sequence_length=sequence_length, dtype=tf.float32, swap_memory=True)
                 output = tf.concat(outputs,2)
-                return output, states
+        return output, states
 
     # LOWERS TOO MUCH PERFORMANCES
     def bilateral_matching_layer(self):

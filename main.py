@@ -50,7 +50,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument('--hidden_size', action="store", dest="hidden_size", default=256, type=int, help="Length of hidden layer.")
     cmdLineParser.add_argument('--max_len_p', action="store", dest="max_len_p", default=MAX_LEN_P, type=int, help="Max lenght for premises.")
     cmdLineParser.add_argument('--max_len_h', action="store", dest="max_len_h", default=MAX_LEN_H, type=int, help="Max lenght for hypothesis.")
-    cmdLineParser.add_argument('--bilstm_layer', action="store", dest="bilstm_layer", default=2, type=int, help="Num layer for context bilstm.")
+    cmdLineParser.add_argument('--bilstm_layer', action="store", dest="bilstm_layer", default=1, type=int, help="Num layer for context bilstm.")
     # cmdLineParser.add_argument('--match_layer', action="store", dest="match_layer", default=1, type=int, help="Num layer for matching.")
     # FLAGS
     cmdLineParser.add_argument("--gpu", dest="use_gpu", action='store_true', help="Enable gpu accelaration.")
