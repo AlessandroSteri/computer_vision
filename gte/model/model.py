@@ -541,7 +541,7 @@ class GroundedTextualEntailmentModel(object):
         timesteps_att = tf.map_fn(lambda x: tf.reduce_sum(x, 0), timesteps_att) #[batch_size, 2 x hidden]
 
 
-        sum_distances = tf.cast(tf.reduce_sum(tf.map_fn(lambda x: cosine_distance(x[0], x[1]), (I2word, timesteps_att), dtype=tf.float32), 0), tf.float32)
+        sum_distances = tf.cast(tf.reduce_sum(tf.map_fn(lambda x: tf.abs(cosine_distance(x[0], x[1])), (I2word, timesteps_att), dtype=tf.float32), 0), tf.float32)
         self.loss += sum_distances
 
 
