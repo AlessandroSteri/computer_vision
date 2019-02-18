@@ -74,6 +74,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument('--decay_step', action="store", dest="decay_step", default=200, type=int, help="Every how many step decay learning rate.")
     cmdLineParser.add_argument('--decay_rate', action="store", dest="decay_rate", default=0.90, type=float, help="Rate for learning rate decay .")
     cmdLineParser.add_argument("--restore", dest="restore", action='store_true', help="Restore model from previous best.")
+    cmdLineParser.add_argument('--sequence_matching', action="store", dest="sequence_matching", default="", type=str, help="Sequence matching to use.")
     options = cmdLineParser.parse_args()
     # }}}
 
@@ -102,8 +103,9 @@ if __name__ == '__main__':
     if options.with_cos_PH: model_info += 'cosPH.'
     if options.with_top_down: model_info += 'topDown.'
     if options.with_P_top_down: model_info += 'P_topDown.'
-    if options.decay: model_info += '.Dec_{}_{}'.format(options.decay_step, options.decay_rate)
-    if options.restore: model_info += '.Res'
+    if options.decay: model_info += 'Dec_{}_{}.'.format(options.decay_step, options.decay_rate)
+    if options.restore: model_info += 'Res.'
+    if options.sequence_matching: model_info += 'SM_' + options.sequence_matching + '.'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info

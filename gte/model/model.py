@@ -90,9 +90,16 @@ class GroundedTextualEntailmentModel(object):
         self.input_layer()
         self.embedding_layer()
         self.context_layer()
-        self.sequence_matching_mutihead_attentive(self.options.hidden_size)
 
-        #self.sequence_matching_with_top_down(self.options.hidden_size)
+        if self.options.sequence_matching == 'sequence_matching':
+            self.sequence_matching(self.options.hidden_size)
+        elif self.options.sequence_matching == 'with_top_down':
+            self.sequence_matching_with_top_down(self.options.hidden_size)
+        elif self.options.sequence_matching == 'with_top_down_multi_learning':
+            self.sequence_matching_with_top_down_multi_learning(self.options.hidden_size)
+        if self.options.sequence_matching == 'mutihead_attentive':
+            self.sequence_matching_mutihead_attentive(self.options.hidden_size)
+        else: assert False
 
         # if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
@@ -102,7 +109,6 @@ class GroundedTextualEntailmentModel(object):
 
         #self.relation_networks_ranker()
 
-        # self.sequence_matching_with_top_down_multi_learning(self.options.hidden_size)
 
         self.prediction_layer()
 
