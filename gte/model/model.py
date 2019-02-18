@@ -99,6 +99,8 @@ class GroundedTextualEntailmentModel(object):
             self.sequence_matching_with_top_down_multi_learning(self.options.hidden_size)
         if self.options.sequence_matching == 'mutihead_attentive':
             self.sequence_matching_mutihead_attentive(self.options.hidden_size)
+        if self.options.sequence_matching == 'multiperspective':
+            self.sequence_matching_multiperspective(self.options.hidden_size)
         else: assert False
 
         # if self.options.with_top_down: self.image_top_down_attention_later()
@@ -544,7 +546,7 @@ class GroundedTextualEntailmentModel(object):
         #Repeat with H and I2word
         q = tf.squeeze(q)  # [B, 2*H]
         q_sub_I = q - I2word
-        q_mul_I = tf.multiply(I2word , q)
+        q_mul_I = tf.multiply(I2word, q)
         I2word_expanded = tf.expand_dims(I2word, axis=1)
         q = tf.expand_dims(q, axis=1)
         q_sub_I = tf.expand_dims(q_sub_I, axis=1)
@@ -597,6 +599,94 @@ class GroundedTextualEntailmentModel(object):
         self.loss += sum_distances
 
 
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
+    def sequence_matching_multiperspective(self, n):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # p_shape = tf.shape(p)
+        # q_shape = tf.shape(q)
+        # p = tf.reshape(p, (-1, 2*self.options.hidden_size))
+        # q = tf.reshape(q, (-1, 2*self.options.hidden_size))
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+
+        p_maxpooling = tf.map_fn(lambda i: tf.reduce_max(self.context_p[i], axis=0), tf.range(self.options.batch_size), dtype=tf.float32) #[B, HH]
+        q_sub_p_maxpooling = p_maxpooling - tf.squeeze(q)
+        q_mul_p_maxpooling = tf.multiply(p_maxpooling , tf.squeeze(q))
+        p_maxpooling = tf.expand_dims(p_maxpooling, axis=1)
+        q_sub_p_maxpooling = tf.expand_dims(q_sub_p_maxpooling, axis=1)
+        q_mul_p_maxpooling = tf.expand_dims(q_mul_p_maxpooling, axis=1)
+        x_cl_maxpooling = tf.concat([p_maxpooling, q, q_sub_p_maxpooling, q_mul_p_maxpooling], 1) # [B, 4, HH]
+        x_cl_maxpooling_flat = tf.reshape(x_cl_maxpooling, (self.options.batch_size*4, 2*self.options.hidden_size))
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_maxpooling_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        self.score += tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+
+        q = tf.squeeze(q)
+        p_attentive_weights = tf.map_fn(lambda i: tf.map_fn(lambda x: 1 - tf.abs(cosine_distance(x, q[i])), self.context_p[i], dtype=q.dtype), tf.range(self.options.batch_size), dtype=tf.float32) #[B, max_len_p]
+        sum_attentive_weights = tf.reduce_sum(p_attentive_weights, axis = 1)
+        p_attentive = tf.map_fn(lambda i: tf.reduce_sum(tf.map_fn(lambda x: tf.multiply(x[0], x[1]), (self.context_p[i], p_attentive_weights[i]), dtype=tf.float32), axis=0) / sum_attentive_weights[i], tf.range(self.options.batch_size), dtype=tf.float32) #[B, HH]
+        q_sub_p_attentive = p_attentive - q
+        q_mul_p_attentive = tf.multiply(p_attentive , q)
+        p_attentive = tf.expand_dims(p_attentive, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p_attentive = tf.expand_dims(q_sub_p_attentive, axis=1)
+        q_mul_p_attentive = tf.expand_dims(q_mul_p_attentive, axis=1)
+        x_cl_attentive = tf.concat([p_attentive, q, q_sub_p_attentive, q_mul_p_attentive], 1) # [B, 4, HH]
+        x_cl_attentive_flat = tf.reshape(x_cl_attentive, (self.options.batch_size*4, 2*self.options.hidden_size))
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_attentive_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        self.score += tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+
+        max_index = tf.argmax(p_attentive_weights, axis=1)
+        p_max_attentive = tf.map_fn(lambda x: tf.multiply(x[0][x[1]], x[2][x[1]]), (self.context_p, max_index, p_attentive_weights), dtype=tf.float32) #[B, HH]
+        q_sub_p_max_attentive = p_max_attentive - tf.squeeze(q)
+        q_mul_p_max_attentive = tf.multiply(p_max_attentive , tf.squeeze(q))
+        p_max_attentive = tf.expand_dims(p_max_attentive, axis=1)
+        q_sub_p_max_attentive = tf.expand_dims(q_sub_p_max_attentive, axis=1)
+        q_mul_p_max_attentive = tf.expand_dims(q_mul_p_max_attentive, axis=1)
+        x_cl_max_attentive = tf.concat([p_max_attentive, q, q_sub_p_max_attentive, q_mul_p_max_attentive], 1) # [B, 4, HH]
+        x_cl_max_attentive_flat = tf.reshape(x_cl_max_attentive, (self.options.batch_size*4, 2*self.options.hidden_size))
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_max_attentive_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        self.score += tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
         if self.options.decay:
             self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
