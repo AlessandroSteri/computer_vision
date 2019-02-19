@@ -101,6 +101,8 @@ class GroundedTextualEntailmentModel(object):
             self.sequence_matching_mutihead_attentive(self.options.hidden_size)
         if self.options.sequence_matching == 'multiperspective':
             self.sequence_matching_multiperspective(self.options.hidden_size)
+        if self.options.sequence_matching == 'bilateral':
+            self.bilateral_matching_layer()
         else: assert False
 
         # if self.options.with_top_down: self.image_top_down_attention_later()
@@ -1174,8 +1176,8 @@ class GroundedTextualEntailmentModel(object):
             with_filter_layer = False
             context_layer_num = 1
             context_lstm_dim = self.options.hidden_size
-            is_training = True
-            dropout_rate = 0.5
+            is_training = True #TODO move to placeholder and tf.cond
+            dropout_rate = self.keep_probability
             with_match_highway = False
             aggregation_layer_num = 1
             aggregation_lstm_dim = 300  # self.options.hidden_size
@@ -1265,4 +1267,6 @@ class GroundedTextualEntailmentModel(object):
             # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
             # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
             # self.pred = tf.matmul(self.match_logits, W_match) + b_match
-            if self.options.with_matching: self.score = self.match_logits
+            self.score = self.match_logits
+            loss_summ = tf.summary.scalar('loss', self.loss)
+            self.train_summary.append(loss_summ)
