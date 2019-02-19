@@ -381,10 +381,10 @@ def match_hypothesis_with_image(image_features_fw, image_features_bw, full_img_r
 
 
 
-        all_image_aware_representatins.append(tf.reduce_max(img_forward_relevancy_matrix, axis=2,keep_dims=True))
-        all_image_aware_representatins.append(tf.reduce_mean(img_forward_relevancy_matrix, axis=2,keep_dims=True))
-        all_image_aware_representatins.append(tf.reduce_max(img_backward_relevancy_matrix, axis=2,keep_dims=True))
-        all_image_aware_representatins.append(tf.reduce_mean(img_backward_relevancy_matrix, axis=2,keep_dims=True))
+        all_image_aware_representatins.append(tf.reduce_max(img_forward_relevancy_matrix, axis=2,keepdims=True))
+        all_image_aware_representatins.append(tf.reduce_mean(img_forward_relevancy_matrix, axis=2,keepdims=True))
+        all_image_aware_representatins.append(tf.reduce_max(img_backward_relevancy_matrix, axis=2,keepdims=True))
+        all_image_aware_representatins.append(tf.reduce_mean(img_backward_relevancy_matrix, axis=2,keepdims=True))
         dim += 4
     return (all_image_aware_representatins, dim)
 
@@ -475,10 +475,10 @@ def match_hypothesis_with_premise(hypothesis_context_representation_fw, hypothes
                 dim += MP_dim
 
 
-        all_hypthesis_matching_representations.append(tf.reduce_max(forward_relevancy_matrix, axis=2,keep_dims=True))
-        all_hypthesis_matching_representations.append(tf.reduce_mean(forward_relevancy_matrix, axis=2,keep_dims=True))
-        all_hypthesis_matching_representations.append(tf.reduce_max(backward_relevancy_matrix, axis=2,keep_dims=True))
-        all_hypthesis_matching_representations.append(tf.reduce_mean(backward_relevancy_matrix, axis=2,keep_dims=True))
+        all_hypthesis_matching_representations.append(tf.reduce_max(forward_relevancy_matrix, axis=2,keepdims=True))
+        all_hypthesis_matching_representations.append(tf.reduce_mean(forward_relevancy_matrix, axis=2,keepdims=True))
+        all_hypthesis_matching_representations.append(tf.reduce_max(backward_relevancy_matrix, axis=2,keepdims=True))
+        all_hypthesis_matching_representations.append(tf.reduce_mean(backward_relevancy_matrix, axis=2,keepdims=True))
         dim += 4
     return (all_hypthesis_matching_representations, dim)
 
@@ -557,11 +557,11 @@ def bilateral_match_func(image_features, in_premise_repres, in_hypothesis_repres
 
     # max and mean pooling at word level
     if not only_image:
-        hypthesis_matching_representations.append(tf.reduce_max(cosine_matrix, axis=2,keep_dims=True)) # [batch_size, hypothesis_length, 1]
-        hypthesis_matching_representations.append(tf.reduce_mean(cosine_matrix, axis=2,keep_dims=True))# [batch_size, hypothesis_length, 1]
+        hypthesis_matching_representations.append(tf.reduce_max(cosine_matrix, axis=2,keepdims=True)) # [batch_size, hypothesis_length, 1]
+        hypthesis_matching_representations.append(tf.reduce_mean(cosine_matrix, axis=2,keepdims=True))# [batch_size, hypothesis_length, 1]
         premise_aware_dim += 2
-        premise_matching_representations.append(tf.reduce_max(cosine_matrix_transpose, axis=2,keep_dims=True))# [batch_size, premise_len, 1]
-        premise_matching_representations.append(tf.reduce_mean(cosine_matrix_transpose, axis=2,keep_dims=True))# [batch_size, premise_len, 1]
+        premise_matching_representations.append(tf.reduce_max(cosine_matrix_transpose, axis=2,keepdims=True))# [batch_size, premise_len, 1]
+        premise_matching_representations.append(tf.reduce_mean(cosine_matrix_transpose, axis=2,keepdims=True))# [batch_size, premise_len, 1]
         hypothesis_aware_dim += 2
 
 
@@ -590,8 +590,8 @@ def bilateral_match_func(image_features, in_premise_repres, in_hypothesis_repres
                         in_premise_repres = tf.concat(in_premise_previous, 2)
                         in_hypothesis_repres = tf.concat(in_hypothesis_previous, 2)
                     # parameters
-                    context_lstm_cell_fw = tf.contrib.rnn.BasicLSTMCell(context_lstm_dim)
-                    context_lstm_cell_bw = tf.contrib.rnn.BasicLSTMCell(context_lstm_dim)
+                    context_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(context_lstm_dim, name='basic_lstm_cell_fw')
+                    context_lstm_cell_bw = tf.nn.rnn_cell.LSTMCell(context_lstm_dim, name='basic_lstm_cell_bw')
                     if is_training:
                         context_lstm_cell_fw = tf.contrib.rnn.DropoutWrapper(context_lstm_cell_fw, output_keep_prob=(1 - dropout_rate))
                         context_lstm_cell_bw = tf.contrib.rnn.DropoutWrapper(context_lstm_cell_bw, output_keep_prob=(1 - dropout_rate))

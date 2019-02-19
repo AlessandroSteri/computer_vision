@@ -1163,14 +1163,14 @@ class GroundedTextualEntailmentModel(object):
         with tf.name_scope('MATCHING'):
             # ========Bilateral Matching=====
             out_image_feats = None
-            in_question_repres = self.context_p
-            in_passage_repres = self.context_h
+            in_question_repres = self.context_h
+            in_passage_repres = self.context_p
             in_question_dep_cons = None
             in_passage_dep_cons = None
-            self.question_lengths = self.lengths_P
-            self.passage_lengths = self.lengths_H
-            question_mask = self.P_mask
-            mask = self.H_mask
+            self.question_lengths = self.lengths_H
+            self.passage_lengths = self.lengths_P
+            question_mask = self.H_mask
+            mask = self.P_mask
             MP_dim = 10
             input_dim = 2*self.options.hidden_size
             with_filter_layer = False
