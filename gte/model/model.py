@@ -7,7 +7,7 @@ from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE, BEST_MODEL
 from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh
-from gte.match.match_utils import bilateral_match_func
+from gte.match.match_utils import bilateral_match_func, multi_highway_layer
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
 from gte.utils.path import mkdir
@@ -1160,11 +1160,21 @@ class GroundedTextualEntailmentModel(object):
 
     # LOWERS TOO MUCH PERFORMANCES
     def bilateral_matching_layer(self):
+        # ======Highway layer======
+        with_highway = True
+        input_dim = self.options.embedding_size
+        highway_layer_num = 1
+        if with_highway:
+            with tf.variable_scope("input_highway"):
+                self.H_lookup = multi_highway_layer(self.H_lookup, input_dim, highway_layer_num)
+                tf.get_variable_scope().reuse_variables()
+                self.P_lookup = multi_highway_layer(self.P_lookup, input_dim, highway_layer_num)
+
         with tf.name_scope('MATCHING'):
             # ========Bilateral Matching=====
             out_image_feats = None
-            in_question_repres = self.context_h
-            in_passage_repres = self.context_p
+            in_question_repres = self.H_lookup
+            in_passage_repres = self.P_lookup
             in_question_dep_cons = None
             in_passage_dep_cons = None
             self.question_lengths = self.lengths_H
@@ -1172,7 +1182,7 @@ class GroundedTextualEntailmentModel(object):
             question_mask = self.H_mask
             mask = self.P_mask
             MP_dim = 10
-            input_dim = 2*self.options.hidden_size
+            input_dim = self.options.embedding_size #2*self.options.hidden_size
             with_filter_layer = False
             context_layer_num = 1
             context_lstm_dim = self.options.hidden_size
