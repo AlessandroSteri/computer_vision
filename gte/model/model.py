@@ -105,6 +105,8 @@ class GroundedTextualEntailmentModel(object):
             self.bilateral_matching_layer()
         if self.options.sequence_matching == 'no_p':
             self.sequence_matching_no_p(self.options.hidden_size)
+        if self.options.sequence_matching == 'no_p_top_down':
+            self.sequence_matching_no_p_top_down(self.options.hidden_size)
         else: assert False
 
         # if self.options.with_top_down: self.image_top_down_attention_later()
@@ -240,6 +242,94 @@ class GroundedTextualEntailmentModel(object):
         W_i = tf.get_variable("w_i", [FEAT_SIZE*NUM_FEATS, 2*self.options.hidden_size], dtype=tf.float32)
         b_i = tf.get_variable("b_i", [2*self.options.hidden_size], dtype=tf.float32)
         p = tf.matmul(p, W_i) + b_i
+
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # p_shape = tf.shape(p)
+        # q_shape = tf.shape(q)
+        # p = tf.reshape(p, (-1, 2*self.options.hidden_size))
+        # q = tf.reshape(q, (-1, 2*self.options.hidden_size))
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+    def sequence_matching_no_p_top_down(self, n):
+        # TODO try conv
+        cell_fw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="fw_cells_H")
+
+        outputs, H_embedding = tf.nn.dynamic_rnn(cell_fw_H, self.H_lookup, dtype=tf.float32, swap_memory=True, sequence_length=self.lengths_H)
+
+        # cell_fw_P = tf.contrib.rnn.GRUBlockCellV2(256, name="fw_cells_P")
+        # cell_bw_P = tf.contrib.rnn.GRUBlockCellV2(256, name="bw_cells_P")
+
+        # outputs, self.P_states = tf.nn.bidirectional_dynamic_rnn(cell_fw_P, cell_bw_P, self.P_lookup, dtype=tf.float32, swap_memory=True)
+
+        # P_embedding = tf.concat([self.P_states[0], self.P_states[1]], 1) #[batch_size x HH]
+
+        #For each location i = 1...K in the image, the feature
+        #vector v_i is concatenated with the question embedding q
+
+        #H_embedding = tf.concat([self.H_states[0], self.H_states[1]], 1) #[batch_size x HH] GRU
+        #H_embedding = tf.concat([self.H_states[0][0], self.H_states[0][1]], 1) #[batch_size x HH] biLSTM
+        # H_embedding = self.H_states #[batch_size x H] GRU one direction
+
+        feat_H = tf.map_fn(lambda i: tf.map_fn(lambda x: tf.concat([x, H_embedding[i]], 0), self.I[i]), tf.convert_to_tensor(list(range(self.options.batch_size)), dtype=tf.int32), dtype=tf.float32) #[batch_size x NUM_FEATS x (FEAT_SIZE + HH)]
+        #Passed through a non-linear layer f_a...
+        HH = self.options.hidden_size# * 2
+        N = 512
+        W_nl = tf.get_variable("W_nl", [N, FEAT_SIZE + HH], dtype=tf.float32)
+        b_nl = tf.get_variable("b_nl", [N], dtype=tf.float32)
+        feat_H = tf.reshape(tf.transpose(tf.to_float(feat_H), perm=[2,0,1]), [FEAT_SIZE + HH, -1]) #[FEAT_SIZE + HH, batch_size * NUM_FEATS]
+        y_att = tf.tanh(tf.transpose(tf.matmul(W_nl, feat_H)) + b_nl) # [batch_size x NUM_FEATS, N]
+        W_nl2 = tf.get_variable("W_nl2", [N, FEAT_SIZE + HH], dtype=tf.float32)
+        b_nl2 = tf.get_variable("b_nl2", [N], dtype=tf.float32)
+        g_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_nl2, feat_H)) + b_nl2) # [batch_size x NUM_FEATS, N]
+        y = tf.multiply(y_att, g_att)  # [batch_size x NUM_FEATS, N]
+        W_a = tf.get_variable("W_a", [1, FEAT_SIZE], dtype=tf.float32)
+        a = tf.matmul(W_a, tf.transpose(y)) # [1, batch_size x NUM_FEATS]
+        #...to obtain a scalar attention weight α_{i,t}
+        alpha = tf.nn.softmax(tf.transpose(a)) # [1, batch_size x NUM_FEATS]
+        alpha = tf.reshape(alpha, [self.options.batch_size, NUM_FEATS, 1])
+        #The image features are then weighted by the normalized values and summed
+        features_att = tf.map_fn(lambda x: tf.multiply(x[1], x[0]), (self.I, alpha), dtype=alpha.dtype) #[batch_size x NUM_FEATS x FEAT_SIZE]
+        self.features_att = tf.map_fn(lambda x: tf.reduce_sum(x, 0), features_att) #[batch_size x FEAT_SIZE]
+
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        # p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+
+        p = tf.reshape(self.features_att, (self.options.batch_size, -1))
+        # W_i = tf.get_variable("w_i", [FEAT_SIZE*NUM_FEATS, 2*self.options.hidden_size], dtype=tf.float32)
+        # b_i = tf.get_variable("b_i", [2*self.options.hidden_size], dtype=tf.float32)
+        # p = tf.matmul(p, W_i) + b_i
 
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
         # p_shape = tf.shape(p)
