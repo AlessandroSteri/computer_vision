@@ -93,19 +93,21 @@ class GroundedTextualEntailmentModel(object):
 
         if self.options.sequence_matching == 'sequence_matching':
             self.sequence_matching(self.options.hidden_size)
+        elif self.options.sequence_matching == 'min_max':
+            self.sequence_matching_min_max(self.options.hidden_size)
         elif self.options.sequence_matching == 'with_top_down':
             self.sequence_matching_with_top_down(self.options.hidden_size)
         elif self.options.sequence_matching == 'with_top_down_multi_learning':
             self.sequence_matching_with_top_down_multi_learning(self.options.hidden_size)
-        if self.options.sequence_matching == 'mutihead_attentive':
+        elif self.options.sequence_matching == 'mutihead_attentive':
             self.sequence_matching_mutihead_attentive(self.options.hidden_size)
-        if self.options.sequence_matching == 'multiperspective':
+        elif self.options.sequence_matching == 'multiperspective':
             self.sequence_matching_multiperspective(self.options.hidden_size)
-        if self.options.sequence_matching == 'bilateral':
+        elif self.options.sequence_matching == 'bilateral':
             self.bilateral_matching_layer()
-        if self.options.sequence_matching == 'no_p':
+        elif self.options.sequence_matching == 'no_p':
             self.sequence_matching_no_p(self.options.hidden_size)
-        if self.options.sequence_matching == 'no_p_top_down':
+        elif self.options.sequence_matching == 'no_p_top_down':
             self.sequence_matching_no_p_top_down(self.options.hidden_size)
         else: assert False
 
@@ -213,6 +215,51 @@ class GroundedTextualEntailmentModel(object):
         z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
         z = tf.reshape(z, (self.options.batch_size, -1))
         W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+    def sequence_matching_min_max(self, n):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # p_shape = tf.shape(p)
+        # q_shape = tf.shape(q)
+        # p = tf.reshape(p, (-1, 2*self.options.hidden_size))
+        # q = tf.reshape(q, (-1, 2*self.options.hidden_size))
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        pq = tf.concat([tf.expand_dims(p, axis=-1), tf.expand_dims(q, axis=-1)], -1)
+        p_max = tf.reduce_max(pq, axis=-1)
+        p_min = tf.reduce_min(pq, axis=-1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p, p_max, p_min], 1)  # [B, 6, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*6, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 6*n], dtype=tf.float32)
         b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
         # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
         self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
