@@ -109,9 +109,11 @@ class GroundedTextualEntailmentModel(object):
             self.sequence_matching_no_p(self.options.hidden_size)
         elif self.options.sequence_matching == 'no_p_top_down':
             self.sequence_matching_no_p_top_down(self.options.hidden_size)
+        if self.options.with_top_down:
+            self.image_top_down_attention_later()
         else: assert False
 
-        # if self.options.with_top_down: self.image_top_down_attention_later()
+        #if self.options.with_top_down: self.image_top_down_attention_later()
         # if self.options.with_matching: self.bilateral_matching_layer()
         # else: self.matching_layer()
         # if not self.options.with_top_down:
@@ -887,7 +889,6 @@ class GroundedTextualEntailmentModel(object):
 
 
     def image_top_down_attention_later(self):
-        import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         cell_fw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="fw_cells_H")
         cell_bw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="bw_cells_H")
 
@@ -926,8 +927,9 @@ class GroundedTextualEntailmentModel(object):
         alpha = tf.nn.softmax(tf.transpose(a)) # [1, batch_size x NUM_FEATS]
         alpha = tf.reshape(alpha, [self.options.batch_size, NUM_FEATS, 1])
         #The image features are then weighted by the normalized values and summed
+        sum_weights = tf.reduce_sum(alpha, axis=1) #[batch_size]
         features_att = tf.map_fn(lambda x: tf.multiply(x[1], x[0]), (self.I, alpha), dtype=alpha.dtype) #[batch_size x NUM_FEATS x FEAT_SIZE]
-        self.features_att = tf.map_fn(lambda x: tf.reduce_sum(x, 0), features_att) #[batch_size x FEAT_SIZE]
+        self.features_att = tf.map_fn(lambda x: tf.reduce_sum(x[0], 0) / x[1], (features_att, sum_weights), dtype=features_att.dtype) #[batch_size x FEAT_SIZE]
 
 
         P_dim = self.options.hidden_size
@@ -1360,14 +1362,15 @@ class GroundedTextualEntailmentModel(object):
         with tf.name_scope('MATCHING'):
             # ========Bilateral Matching=====
             out_image_feats = None
-            in_question_repres = self.H_lookup
-            in_passage_repres = self.P_lookup
+            in_question_repres = self.P_lookup
+            in_passage_repres = self.H_lookup
+            #in_passage_repres = tf.zeros([self.options.batch_size, self.options.max_len_h, self.options.embedding_size])
             in_question_dep_cons = None
             in_passage_dep_cons = None
-            self.question_lengths = self.lengths_H
-            self.passage_lengths = self.lengths_P
-            question_mask = self.H_mask
-            mask = self.P_mask
+            self.question_lengths = self.lengths_P
+            self.passage_lengths = self.lengths_H
+            question_mask = self.P_mask
+            mask = self.H_mask
             MP_dim = 10
             input_dim = self.options.embedding_size #2*self.options.hidden_size
             with_filter_layer = False
@@ -1454,13 +1457,10 @@ class GroundedTextualEntailmentModel(object):
             clipper = 50
             optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
             tvars = tf.trainable_variables()
-            l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
-            self.loss = self.loss + 1e-5 * l2_loss
+            #l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+            #self.loss = self.loss + 1e-5 * l2_loss
             grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
-            if self.options.decay:
-                self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
-            else:
-                self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
             # W_match = tf.get_variable("w_match", [self.match_dim/2, NUM_CLASSES], dtype=tf.float32)
             # b_match = tf.get_variable("b_match", [NUM_CLASSES], dtype=tf.float32)
             # self.pred = tf.matmul(self.match_logits, W_match) + b_match
