@@ -70,6 +70,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_top_down", dest="with_top_down", action='store_true', help="Use top down image attention.")
     cmdLineParser.add_argument("--with_P_top_down", dest="with_P_top_down", action='store_true', help="Use top down image attention for P.")
     cmdLineParser.add_argument("--with_mlp", dest="with_mlp", action='store_true', help="Use MLP in top down image attention.")
+    cmdLineParser.add_argument("--baseline", dest="baseline", action='store_true', help="Uses only H to see dataset biases and compute a baseline for the task.")
 
     cmdLineParser.add_argument("--decay", dest="decay", action='store_true', help="Use decay for learning rate.")
     cmdLineParser.add_argument('--decay_step', action="store", dest="decay_step", default=200, type=int, help="Every how many step decay learning rate.")
@@ -108,6 +109,7 @@ if __name__ == '__main__':
     if options.decay: model_info += 'Dec_{}_{}.'.format(options.decay_step, options.decay_rate)
     if options.restore: model_info += 'Res.'
     if options.sequence_matching: model_info += 'SM_' + options.sequence_matching + '.'
+    if options.baseline: model_info += 'baseline.'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info
