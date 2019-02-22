@@ -33,6 +33,8 @@ class GroundedTextualEntailmentModel(object):
         if self.options.restore: self.restore_session()
         self.best_f1 = self.get_best_f1()
         self.img2vec = Image2vec() if options.with_img else None
+        self.max_f1 = 0
+        self.max_f1_update = []
 
     def __enter__(self):
         # self.session = tf.Session()
@@ -1410,6 +1412,13 @@ class GroundedTextualEntailmentModel(object):
             self.eval_summary.append(tf.summary.scalar('Accuracy', self.accuracy))
             self.eval_summary.append(tf.summary.scalar('F1', self.f1))
 
+            # log current model growth
+        with tf.name_scope('stats'):
+            self._max_f1 = tf.placeholder(tf.float32, [])
+            self.max_f1_summary = tf.summary.scalar('MaxF1', self._max_f1)
+            self._max_f1_update = tf.placeholder(tf.float32, [])
+            self.max_f1_update_summary = tf.summary.scalar('MaxF1_Updates', self._max_f1_update)
+
     def predict(self, DATASET):
         predictions, labels = [], []
         for batch in generate_batch(DATASET,
@@ -1529,8 +1538,18 @@ class GroundedTextualEntailmentModel(object):
                         print("entailment:{}".format(self.label2id["entailment"]))
                         print('--------------------------------')
 
-                        # delta = 1.1
-                        if f1 >= self.best_f1:# * delta:
+                        if f1 > self.max_f1:
+                            print("New Max F1 for current model: {}, old was: {}".format(f1, self.max_f1))
+                            self.max_f1 = f1
+                            delta_step = step if not len(self.max_f1_update) else step - self.max_f1_update[-1]
+                            self.max_f1_update.append(step)
+                            feed_dictionary = {self._max_f1: f1,
+                                               self._max_f1_update: delta_step}
+                            max_f1_summ, update_f1_summ = session.run([self.max_f1_summary, self.max_f1_update_summary], feed_dict=feed_dictionary)
+                            self.writer.add_summary(max_f1_summ, step)
+                            self.writer.add_summary(update_f1_summ, step)
+
+                        if f1 > self.best_f1:
                             print("New Best F1: {}, old was: {}".format(f1, self.best_f1))
                             print('--------------------------------')
                             self.store_best_f1(f1)
