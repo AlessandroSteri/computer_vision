@@ -93,7 +93,9 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
 
-        if self.options.with_top_down:
+        if self.options.baseline:
+            self.baseline()
+        elif self.options.with_top_down:
             self.image_top_down_attention_later()
         elif self.options.sequence_matching == 'sequence_matching':
             self.sequence_matching(self.options.hidden_size)
@@ -205,6 +207,37 @@ class GroundedTextualEntailmentModel(object):
                 bw_similarity = tf.expand_dims(bw_similarity, -1) #[batch_size, 1]
                 self.p_h_similarity = tf.concat([fw_similarity, bw_similarity], -1) #[batch_size, 2]
                 self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
+
+
+    def baseline(self):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # q = tf.reshape(q, (self.options.batch_size, 2*self.options.hidden_size))
+        W_1= tf.get_variable("W_1", [300, 2*self.options.hidden_size], dtype=tf.float32)
+        b_1 = tf.get_variable("b_1", [300], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_1, tf.transpose(q))) + b_1
+        # z = tf.reshape(z, (self.options.batch_size, -1))
+        W_2= tf.get_variable("W_2", [NUM_CLASSES, 300], dtype=tf.float32)
+        b_2 = tf.get_variable("b_2", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_2, tf.transpose(tf.nn.relu(z)))) + b_2
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
 
     def sequence_matching(self, n):
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
@@ -1525,6 +1558,7 @@ class GroundedTextualEntailmentModel(object):
                     print("RunID:", self.ID)
                     print("Epoch:", epoch, "Iteration:", iteration, "Global Iteration:", step)
                     print("Loss: ", loss)
+                    print("MAX_F1: ", self.max_f1)
                     if step != 0:
                         # Predict without training
                         eval_predictions, labels = self.predict(DEV_DATA)
