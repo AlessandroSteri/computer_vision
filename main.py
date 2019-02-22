@@ -45,7 +45,7 @@ if __name__ == '__main__':
     # cmdLineParser.add_argument("learning_rate", default=0.01, type=float, help="Base learning rate.")
     cmdLineParser.add_argument('--learning_rate', action="store", dest="learning_rate", default=0.001, type=float, help="Learning rate.")
     # cmdLineParser.add_argument("step_check",  default=50, type=int, help="Every how many iteration check accuracy over dev sets.")
-    cmdLineParser.add_argument('--step_check', action="store", dest="step_check", default=200, type=int, help="Every how many iteration check accuracy over dev sets.")
+    cmdLineParser.add_argument('--step_check', action="store", dest="step_check", default=500, type=int, help="Every how many iteration check accuracy over dev sets.")
     # cmdLineParser.add_argument("hidden_size", type=int, help="Length of hidden layer.")
     cmdLineParser.add_argument('--hidden_size', action="store", dest="hidden_size", default=256, type=int, help="Length of hidden layer.")
     cmdLineParser.add_argument('--max_len_p', action="store", dest="max_len_p", default=MAX_LEN_P, type=int, help="Max lenght for premises.")
