@@ -3,13 +3,14 @@ import math
 import csv
 
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
+from keras.preprocessing import image
 
-from gte.info.info import MAX_LEN_P, MAX_LEN_H, UNK, PAD
+from gte.info.info import MAX_LEN_P, MAX_LEN_H, UNK, PAD, IMG_DATA
 from gte.utils.dic import dic_lookup_case_sensitive
 
 class Batch(object):
     """Batch"""
-    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, P_lv=None, H_lv=None, P_rel=None, H_rel=None):
+    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, P_lv=None, H_lv=None, P_rel=None, H_rel=None, full_img=False):
         self.size = batch_size
         lookup = lambda x: dic_lookup_case_sensitive(word2id, x, UNK)
         self.P = self._map_sequences_id(P, lookup, max_len_p)
@@ -19,6 +20,14 @@ class Batch(object):
         self.lengths_H = np.array([min(len(h), max_len_h) for h in H])
         self.IDs = np.array(IDs)
         self.I = I
+
+        if full_img:
+            import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            def id_to_img(img_id):
+                img = image.load_img(IMG_DATA + "/" + img_id, target_size=(256, 256)) #[256 x 256]
+                img_array = image.img_to_array(img) #[256 x 256 x channels]
+                return np.expand_dims(img_array, axis=0) #[1 x 256 x 256 x channels]
+            self.IMG = [id_to_img(iid) for iid in I]
         if P_lv is not None:
             self.P_lv = pad_sequences(P_lv, maxlen=max_len_p, dtype='int32', padding='post', truncating='post', value=PAD)
             self.H_lv = pad_sequences(H_lv, maxlen=max_len_h, dtype='int32', padding='post', truncating='post', value=PAD)

@@ -32,7 +32,7 @@ class GroundedTextualEntailmentModel(object):
         self.session = tf.Session()
         if self.options.restore: self.restore_session()
         self.best_f1 = self.get_best_f1()
-        self.img2vec = Image2vec() if options.with_img else None
+        self.img2vec = Image2vec() # if options.with_img else None
         self.max_f1 = 0
         self.max_f1_update = []
 
