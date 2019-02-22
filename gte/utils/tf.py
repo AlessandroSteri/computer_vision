@@ -84,6 +84,19 @@ def gated_tanh(x, output_size=None, W_plus_b=None, W_plus_b_prime=None):
     g = tf.nn.sigmoid(W_plus_b_prime(x))
     return tf.multiply(y_tilde, g)
 
+def mlp(x, input_size, num_classes, hidden_size=256, name=""):
+    h1 = tf.get_variable(name + "mlp_hidden1", [input_size, hidden_size], dtype=tf.float32)
+    h2 = tf.get_variable(name + "mlp_hidden2", [hidden_size, hidden_size], dtype=tf.float32)
+    out = tf.get_variable(name + "mlp_out", [hidden_size, num_classes], dtype=tf.float32)
+    b1 = tf.get_variable(name + "mlp_b1", [hidden_size], dtype=tf.float32),
+    b2 = tf.get_variable(name + "mlp_b2", [hidden_size], dtype=tf.float32),
+    b_out = tf.get_variable(name + "mlp_b_out", [num_classes], dtype=tf.float32)
+
+    layer_1 = tf.matmul(x, h1) + b1
+    layer_2 = tf.matmul(layer_1, h2) + b2
+    out_layer = tf.matmul(layer_2, out) + b_out
+    return out_layer
+
 #TODO
 # def character_embedding(batch_size, max_sentence_len, embedding_size, char_dic):
     # pass

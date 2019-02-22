@@ -6,7 +6,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
 from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE, BEST_MODEL
-from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh
+from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh, mlp
 from gte.match.match_utils import bilateral_match_func, multi_highway_layer
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
@@ -996,34 +996,38 @@ class GroundedTextualEntailmentModel(object):
         #...and then combined with a simple Hadamard product
         self.fusion = tf.multiply(y_h, y_I) # [batch_size x H]
 
+        if self.options.with_mlp:
+            mlp1 = mlp(self.fusion, self.options.hidden_size, NUM_CLASSES, name="mlp1")
+            mlp2 = mlp(self.fusion, self.options.hidden_size, NUM_CLASSES, name="mlp2")
+            self.score = mlp1 + mlp2
+        else:
+            if self.options.with_P_top_down:
+                self.fusion = tf.multiply(self.fusion, y_P4) # [batch_size x H]
 
-        if self.options.with_P_top_down:
-            self.fusion = tf.multiply(self.fusion, y_P4) # [batch_size x H]
+            #Passes the joint embedding through a non-linear layer f_o...
+            W_fusion_nl = tf.get_variable("W_fusion_nl", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
+            b_fusion_nl = tf.get_variable("b_fusion_nl", [FEAT_SIZE / 2], dtype=tf.float32)
+            y_fusion_att = tf.tanh(tf.transpose(tf.matmul(W_fusion_nl, tf.transpose(self.fusion))) + b_fusion_nl) # [batch_size x FEAT_SIZE / 2]
 
-        #Passes the joint embedding through a non-linear layer f_o...
-        W_fusion_nl = tf.get_variable("W_fusion_nl", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
-        b_fusion_nl = tf.get_variable("b_fusion_nl", [FEAT_SIZE / 2], dtype=tf.float32)
-        y_fusion_att = tf.tanh(tf.transpose(tf.matmul(W_fusion_nl, tf.transpose(self.fusion))) + b_fusion_nl) # [batch_size x FEAT_SIZE / 2]
+            W_fusion_nl2 = tf.get_variable("W_fusion_nl2", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
+            b_fusion_nl2 = tf.get_variable("b_fusion_nl2", [FEAT_SIZE / 2], dtype=tf.float32)
+            g_fusion_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
+            y_fusion = tf.multiply(y_fusion_att, g_fusion_att)  # [batch_size x FEAT_SIZE / 2]
 
-        W_fusion_nl2 = tf.get_variable("W_fusion_nl2", [FEAT_SIZE / 2, self.options.hidden_size], dtype=tf.float32)
-        b_fusion_nl2 = tf.get_variable("b_fusion_nl2", [FEAT_SIZE / 2], dtype=tf.float32)
-        g_fusion_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
-        y_fusion = tf.multiply(y_fusion_att, g_fusion_att)  # [batch_size x FEAT_SIZE / 2]
+            #y_fusion = tf.concat([P_embedding, y_fusion], 1) # [batch_size x (FEAT_SIZE / 2 + HH)]
 
-        #y_fusion = tf.concat([P_embedding, y_fusion], 1) # [batch_size x (FEAT_SIZE / 2 + HH)]
+            #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
+            #W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
+            #self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
 
-        #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
-        #W_o = tf.get_variable("W_o", [NUM_CLASSES, FEAT_SIZE / 2], dtype=tf.float32)
-        #self.score = tf.transpose(tf.matmul(W_o, tf.transpose(y_fusion))) # [batch_size x NUM_CLASSES]
+            dropout_prob = 0.5
+            dimension = int(FEAT_SIZE / 2) #int(FEAT_SIZE / 2 + self.options.hidden_size * 2)
 
-        dropout_prob = 0.5
-        dimension = int(FEAT_SIZE / 2) #int(FEAT_SIZE / 2 + self.options.hidden_size * 2)
+            gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, dimension), keep_prob=dropout_prob)
+            gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, dimension), keep_prob=dropout_prob)
+            gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, dimension), keep_prob=dropout_prob)
 
-        gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, dimension), keep_prob=dropout_prob)
-        gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, dimension), keep_prob=dropout_prob)
-        gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, dimension), keep_prob=dropout_prob)
-
-        self.score = tf.contrib.layers.fully_connected(gated_third_layer, NUM_CLASSES, activation_fn=None)
+            self.score = tf.contrib.layers.fully_connected(gated_third_layer, NUM_CLASSES, activation_fn=None)
 
         prob = tf.nn.softmax(self.score)
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)

@@ -69,6 +69,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--with_cos_PH", dest="with_cos_PH", action='store_true', help="Use cosine similarity between context_p and context_h.")
     cmdLineParser.add_argument("--with_top_down", dest="with_top_down", action='store_true', help="Use top down image attention.")
     cmdLineParser.add_argument("--with_P_top_down", dest="with_P_top_down", action='store_true', help="Use top down image attention for P.")
+    cmdLineParser.add_argument("--with_mlp", dest="with_mlp", action='store_true', help="Use MLP in top down image attention.")
 
     cmdLineParser.add_argument("--decay", dest="decay", action='store_true', help="Use decay for learning rate.")
     cmdLineParser.add_argument('--decay_step', action="store", dest="decay_step", default=200, type=int, help="Every how many step decay learning rate.")
@@ -102,6 +103,7 @@ if __name__ == '__main__':
     if options.wo_SW: model_info += 'SWlower.'
     if options.with_cos_PH: model_info += 'cosPH.'
     if options.with_top_down: model_info += 'topDown.'
+    if options.with_mlp: model_info += 'mlp.'
     if options.with_P_top_down: model_info += 'P_topDown.'
     if options.decay: model_info += 'Dec_{}_{}.'.format(options.decay_step, options.decay_rate)
     if options.restore: model_info += 'Res.'
