@@ -109,7 +109,7 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=
                     I = [id_to_img(iid[0]) for iid in I]
                     I = np.reshape(I, (batch_size, WIDTH, HEIGHT, CHANNELS))
                     # I = np.ones([batch_size, 49, 512], dtype=np.float32)
-                    print("[WARNING] NO VGG FEATURE FOR IMAGES.")
+                    # print("[WARNING] NO VGG FEATURE FOR IMAGES.")
                 else:
                     I = np.array([img2vec.get_features(i[0]) for i in I])
                 if not with_DEP:
