@@ -5,12 +5,13 @@ import numpy as np
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 from gte.preprocessing.batch import generate_batch
-from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE, BEST_MODEL
+from gte.info import TB_DIR, NUM_CLASSES, DEV_DATA, TRAIN_DATA, TEST_DATA, TEST_DATA_HARD, TEST_DATA_DEMO, BEST_F1, LEN_TRAIN, LEN_DEV, LEN_TEST, LEN_TEST_HARD, NUM_FEATS, FEAT_SIZE, DEP_REL_SIZE, BEST_MODEL, WIDTH, HEIGHT, CHANNELS
 from gte.utils.tf import bilstm_layer, highway, attention_layer, cosine_distance, gated_tanh, mlp
 from gte.match.match_utils import bilateral_match_func, multi_highway_layer
 from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
 from gte.utils.path import mkdir
+from gte.auenc import cnn_auto_encoder
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
@@ -32,7 +33,7 @@ class GroundedTextualEntailmentModel(object):
         self.session = tf.Session()
         if self.options.restore: self.restore_session()
         self.best_f1 = self.get_best_f1()
-        self.img2vec = Image2vec() # if options.with_img else None
+        self.img2vec = Image2vec() if not options.autoencoder else None
         self.max_f1 = 0
         self.max_f1_update = []
 
@@ -93,7 +94,9 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
 
-        if self.options.baseline:
+        if self.options.autoencoder:
+            self.sequence_matching_autoencode(self.options.hidden_size)
+        elif self.options.baseline:
             self.baseline()
         elif self.options.with_top_down:
             self.image_top_down_attention_later()
@@ -142,12 +145,16 @@ class GroundedTextualEntailmentModel(object):
         print('[GTE][MODEL] Created graph!')
         # return graph
 
+
     def input_layer(self):
         # Define input data tensors.
         with tf.name_scope('INPUTS'):
             self.P = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P')  # shape [batch_size, max_len_p]
             self.H = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H')  # shape [batch_size, max_len_h]
-            self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, NUM_FEATS, FEAT_SIZE], name='H')  # shape [batch_size, max_len_h]
+            if self.options.autoencoder:
+                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, WIDTH, HEIGHT, CHANNELS], name='H')  # shape [batch_size, max_len_h]
+            else:
+                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, NUM_FEATS, FEAT_SIZE], name='H')  # shape [batch_size, max_len_h]
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
@@ -208,6 +215,69 @@ class GroundedTextualEntailmentModel(object):
                 self.p_h_similarity = tf.concat([fw_similarity, bw_similarity], -1) #[batch_size, 2]
                 self.p_h_similarity = highway(self.p_h_similarity, 2, tf.nn.relu)
 
+    def autoencode_I(self):
+        self.autoencoder_loss, I = cnn_auto_encoder(self.I, self.options.batch_size, dim_width=WIDTH, dim_height=HEIGHT, nchannels=CHANNELS)
+        # I shape [BATCH, 30 , 30, 16]
+        au_H = 30*30*16
+        I = tf.reshape(I, (self.options.batch_size, au_H))
+        #TODO prova ad usare top_down per convertire autoencoder in feature usando H
+        W_ae= tf.get_variable("W_ae", [au_H, NUM_FEATS*FEAT_SIZE], dtype=tf.float32)
+        b_ae = tf.get_variable("b_ae", [NUM_FEATS*FEAT_SIZE], dtype=tf.float32)
+        self.IMG = tf.matmul(I, W_ae) + b_ae
+        self.IMG = tf.reshape(self.IMG, (self.options.batch_size, NUM_FEATS, FEAT_SIZE))
+        for i in range(10):
+            print('____________________________________________________________')
+            print('Sum autoencoder loss to loss!!!!!!!!!!!!!!!!!!!!!')
+            print('____________________________________________________________')
+
+    def sequence_matching_autoencode(self, n):
+        self.autoencode_I()
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        # p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+
+        p = tf.reshape(self.IMG, (self.options.batch_size, -1))
+        W_i = tf.get_variable("w_i", [FEAT_SIZE*NUM_FEATS, 2*self.options.hidden_size], dtype=tf.float32)
+        b_i = tf.get_variable("b_i", [2*self.options.hidden_size], dtype=tf.float32)
+        p = tf.matmul(p, W_i) + b_i
+
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        # p_shape = tf.shape(p)
+        # q_shape = tf.shape(q)
+        # p = tf.reshape(p, (-1, 2*self.options.hidden_size))
+        # q = tf.reshape(q, (-1, 2*self.options.hidden_size))
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = (self.loss + 1e-5 * l2_loss) + self.autoencoder_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
 
     def baseline(self):
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT

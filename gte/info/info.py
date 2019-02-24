@@ -16,6 +16,11 @@ TEST_DATA = './DATA/vsnli/DEP/VSNLI_1.0_test.tsv'
 TEST_DATA_HARD = './DATA/vsnli/DEP/VSNLI_1.0_test_hard.tsv'
 TEST_DATA_DEMO = './DATA/vsnli/DEP/VSNLI_1.0_demo.tsv'
 
+# images for autoencoder
+WIDTH = 256
+HEIGHT = 256
+CHANNELS = 3
+
 #TRAIN_DATA = './DATA/vsnli/DEP/NO_STOPWORDS/VSNLI_1.0_train.tsv'
 #DEV_DATA = './DATA/vsnli/DEP/NO_STOPWORDS/VSNLI_1.0_dev.tsv'
 #TEST_DATA = './DATA/vsnli/DEP/NO_STOPWORDS/VSNLI_1.0_test.tsv'

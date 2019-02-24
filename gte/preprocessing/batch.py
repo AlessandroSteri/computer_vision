@@ -5,7 +5,7 @@ import csv
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing import image
 
-from gte.info.info import MAX_LEN_P, MAX_LEN_H, UNK, PAD, IMG_DATA
+from gte.info.info import MAX_LEN_P, MAX_LEN_H, UNK, PAD, IMG_DATA, HEIGHT, WIDTH, CHANNELS
 from gte.utils.dic import dic_lookup_case_sensitive
 
 class Batch(object):
@@ -100,8 +100,16 @@ def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=
                         # hypothesis = row[5].strip()
                 #complete batch
                 if img2vec == None:
-                    I = np.ones([batch_size, 49, 512], dtype=np.float32)
-                    print("NO IMAGES")
+                # if full_img:
+                    # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+                    def id_to_img(img_id):
+                        img = image.load_img(IMG_DATA + "/" + img_id, target_size=(256, 256)) #[256 x 256]
+                        img_array = image.img_to_array(img) #[256 x 256 x channels]
+                        return np.expand_dims(img_array, axis=0) #[1 x 256 x 256 x channels]
+                    I = [id_to_img(iid[0]) for iid in I]
+                    I = np.reshape(I, (batch_size, WIDTH, HEIGHT, CHANNELS))
+                    # I = np.ones([batch_size, 49, 512], dtype=np.float32)
+                    print("[WARNING] NO VGG FEATURE FOR IMAGES.")
                 else:
                     I = np.array([img2vec.get_features(i[0]) for i in I])
                 if not with_DEP:

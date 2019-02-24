@@ -77,6 +77,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument('--decay_rate', action="store", dest="decay_rate", default=0.90, type=float, help="Rate for learning rate decay .")
     cmdLineParser.add_argument("--restore", dest="restore", action='store_true', help="Restore model from previous best.")
     cmdLineParser.add_argument('--sequence_matching', action="store", dest="sequence_matching", default="", type=str, help="Sequence matching to use.")
+    cmdLineParser.add_argument("--autoencoder", dest="autoencoder", action='store_true', help="Disables VGG and uses a CNN autoencoder to compute features.")
     options = cmdLineParser.parse_args()
     # }}}
 
