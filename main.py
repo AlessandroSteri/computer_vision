@@ -110,6 +110,7 @@ if __name__ == '__main__':
     if options.decay: model_info += 'Dec_{}_{}.'.format(options.decay_step, options.decay_rate)
     if options.restore: model_info += 'Res.'
     if options.sequence_matching: model_info += 'SM_' + options.sequence_matching + '.'
+    if options.autoencoder: model_info += 'AutEnc.'
     if options.baseline: model_info += 'baseline.'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
