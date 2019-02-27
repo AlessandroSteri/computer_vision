@@ -142,7 +142,6 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, i
                 P, H, labels, I, IDs, P_lv, H_lv, P_rel, H_rel = [], [], [], [], [], [], [], [], []
                 while len(labels) < batch_size:
                     row = f.readline()
-                    line = json.loads(row)
                     if not row:
                         #last batch is not complete
                         f.seek(0)
@@ -150,6 +149,7 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, i
                         line = json.loads(row)
                         last_batch = True
                     else:
+                        line = json.loads(row)
                         labels += [str(line['gold_label'])]
                         H += [str(line['sentence2']).strip().translate(translation).split()]
                         img = str(line['Flikr30kID']).strip().split("#")
