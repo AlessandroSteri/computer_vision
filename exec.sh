@@ -1,1 +1,1 @@
-time python3 main.py --autoencoder --dropout --gpu --step_check=500 --dev_env --trainable --learning_rate 0.0001 --epoch 300 #--sequence_matching=no_p_split   --baseline --restore # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2 --with_top_down --with_P_top_down
+time python3 main.py --dropout --gpu --step_check=500 --max_len_p=40 --dev_env --trainable --with_top_down --with_mlp --learning_rate 0.0001 --epoch 300 --with_img # --restore # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2

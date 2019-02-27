@@ -1,6 +1,8 @@
 import os
 import random
+import json
 import csv
+import string
 from tqdm import tqdm
 from gte.info import TRAIN_DATA, DEV_DATA, TEST_DATA, TEST_DATA_HARD, X_TRAIN_DATA, X_DEV_DATA, X_TEST_DATA, X_TEST_DATA_HARD, UNK, SHUFFLED_DIR
 from gte.utils.dic import index_map
@@ -57,6 +59,33 @@ def datasets_to_word_set(use_only_token=True):
                     hypothesis = row[HYPOTHESIS].strip()
                     words.extend(sentence_to_words(hypothesis))
     return set(words), labels, lens_p, lens_h
+
+
+def datasets_to_word_set_VE():
+    datasets = [TRAIN_DATA, DEV_DATA, TEST_DATA]
+    translation = {ord(char): " {}".format(char) for char in string.punctuation}
+
+    words = []
+    labels = set()
+    lens_p = []
+    lens_h = []
+    for filename in datasets:
+        with open(filename) as in_file:
+            for line in tqdm(in_file.readlines()):
+                row = json.loads(line)
+                label = str(row['gold_label'])
+                labels.add(label)
+
+                premise_tokens = str(row['sentence1']).strip().translate(translation).split()
+                lens_p += [len(premise_tokens)]
+                words.extend(sentence_to_words(premise_tokens))
+
+                hypothesis_tokens = str(row['sentence2']).strip().translate(translation).split()
+                lens_h += [len(hypothesis_tokens)]
+                words.extend(sentence_to_words(hypothesis_tokens))
+
+    return set(words), labels, lens_p, lens_h
+
 
 def sentence_to_words(sentence):
     return { w for w in sentence }.union({ w.lower() for w in sentence  })

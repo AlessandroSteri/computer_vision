@@ -10,9 +10,12 @@ X_TEST_DATA_HARD = './DATA/vsnli/VSNLI_1.0_test_hard.tsv'
 
 SHUFFLED_DIR = './DATA/vsnli/SHUFFLED'
 
-TRAIN_DATA = './DATA/vsnli/DEP/VSNLI_1.0_train.tsv'
-DEV_DATA = './DATA/vsnli/DEP/VSNLI_1.0_dev.tsv'
-TEST_DATA = './DATA/vsnli/DEP/VSNLI_1.0_test.tsv'
+TRAIN_DATA = './DATA/vesnli/snli_ve_train.jsonl'
+DEV_DATA = './DATA/vesnli/snli_ve_dev.jsonl'
+TEST_DATA = './DATA/vesnli/snli_ve_test.jsonl'
+#TRAIN_DATA = './DATA/vsnli/DEP/VSNLI_1.0_train.tsv'
+#DEV_DATA = './DATA/vsnli/DEP/VSNLI_1.0_dev.tsv'
+#TEST_DATA = './DATA/vsnli/DEP/VSNLI_1.0_test.tsv'
 TEST_DATA_HARD = './DATA/vsnli/DEP/VSNLI_1.0_test_hard.tsv'
 TEST_DATA_DEMO = './DATA/vsnli/DEP/VSNLI_1.0_demo.tsv'
 
@@ -44,9 +47,9 @@ EPS = 1e-6
 NUM_FEATS = 49
 FEAT_SIZE = 512
 
-LEN_TRAIN = 545621 - 1
-LEN_DEV = 9843 - 1
-LEN_TEST = 9825 - 1
+LEN_TRAIN = 529527 #545621 - 1
+LEN_DEV = 17858 #9843 - 1
+LEN_TEST = 17901 #9825 - 1
 LEN_TEST_HARD = 545621 - 1
 DEP_REL = {'empty',
            'cop',

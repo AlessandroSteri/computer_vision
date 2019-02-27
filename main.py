@@ -4,15 +4,15 @@ from gte.model import GroundedTextualEntailmentModel
 from gte.utils.log import id_gen
 from gte.utils.dic import index_map
 from gte.info import MAX_LEN_P, MAX_LEN_H, SHUFFLED_DIR, DEP_REL
-from gte.preprocessing.dataset import datasets_to_word_set, words_to_dictionary, generate_shuffled_datasets, generate_datasets_with_dependency
+from gte.preprocessing.dataset import datasets_to_word_set_VE, words_to_dictionary, generate_shuffled_datasets, generate_datasets_with_dependency
 from gte.images import Image2vec
 from collections import Counter
 
 
 def main(options, ID):
-    if not os.path.exists(SHUFFLED_DIR): generate_shuffled_datasets()
+    #if not os.path.exists(SHUFFLED_DIR): generate_shuffled_datasets()
 
-    words, labels, lens_p, lens_h = datasets_to_word_set()
+    words, labels, lens_p, lens_h = datasets_to_word_set_VE()
     #print(sorted(Counter(lens_p).items()))
     #print("\n", sorted(Counter(lens_h).items()))
     # print("Words: ", len(words))
