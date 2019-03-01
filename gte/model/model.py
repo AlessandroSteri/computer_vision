@@ -102,6 +102,8 @@ class GroundedTextualEntailmentModel(object):
             self.image_top_down_attention_later()
         elif self.options.sequence_matching == 'sequence_matching':
             self.sequence_matching(self.options.hidden_size)
+        elif self.options.sequence_matching == 'image':
+            self.image_sequence_matching(self.options.hidden_size)
         elif self.options.sequence_matching == 'min_max':
             self.sequence_matching_min_max(self.options.hidden_size)
         elif self.options.sequence_matching == 'with_top_down':
@@ -1119,6 +1121,50 @@ class GroundedTextualEntailmentModel(object):
         self.loss += sum_distances
 
 
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
+    def sequence_matching_primitive(self, p, q, n):
+        with tf.variable_scope("sequence_matiching_primitive", reuse=tf.AUTO_REUSE):
+            q_sub_p = p - q  # TODO try with module
+            q_mul_p = tf.multiply(p , q)
+            p = tf.expand_dims(p, axis=1)
+            q = tf.expand_dims(q, axis=1)
+            q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+            q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+            x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+            x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+            W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+            b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+            z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+            z = tf.reshape(z, (self.options.batch_size, -1))
+            W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+            b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+            score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
+            return score
+
+
+    def image_sequence_matching(self, n):
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        I = tf.transpose(self.I, perm=[1,0,2]) #[NUM_FEATS, B, FEAT_SIZE]
+        scores = tf.map_fn(lambda x: self.sequence_matching_primitive(x, q, n), I, dtype=q.dtype) #[NUM_FEATS, NUM_CLASSES]
+        self.score = tf.reduce_sum(scores, axis=0) #[NUM_CLASSES]
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
         if self.options.decay:
             self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
