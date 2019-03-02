@@ -15,7 +15,7 @@ from gte.auenc import cnn_auto_encoder
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
-    def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel):
+    def __init__(self, options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel, labelid2id=None):
         self.options = options
         self.learning_rate = self.options.learning_rate
         self.ID = ID
@@ -26,6 +26,7 @@ class GroundedTextualEntailmentModel(object):
         self.id2label = id2label
         self.rel2id = rel2id
         self.id2rel = id2rel
+        self.labelid2id = labelid2id
         self.train_summary = []
         self.eval_summary = []
         self.test_summary = []
@@ -36,6 +37,7 @@ class GroundedTextualEntailmentModel(object):
         self.img2vec = Image2vec() if not options.autoencoder else None
         self.max_f1 = 0
         self.max_f1_update = []
+
 
     def __enter__(self):
         # self.session = tf.Session()
@@ -104,6 +106,8 @@ class GroundedTextualEntailmentModel(object):
             self.sequence_matching(self.options.hidden_size)
         elif self.options.sequence_matching == 'image':
             self.image_sequence_matching(self.options.hidden_size)
+        elif self.options.sequence_matching == 'image_embedding':
+            self.image_sequence_matching_to_embedding(self.options.hidden_size)
         elif self.options.sequence_matching == 'min_max':
             self.sequence_matching_min_max(self.options.hidden_size)
         elif self.options.sequence_matching == 'with_top_down':
@@ -138,8 +142,10 @@ class GroundedTextualEntailmentModel(object):
 
         #self.relation_networks_ranker()
 
-
-        self.prediction_layer()
+        if self.options.sequence_matching == "image_embedding":
+            self.prediction_layer_embedding()
+        else:
+            self.prediction_layer()
 
         self.create_evaluation_graph()
 
@@ -1131,7 +1137,7 @@ class GroundedTextualEntailmentModel(object):
         self.train_summary.append(loss_summ)
 
 
-    def sequence_matching_primitive(self, p, q, n):
+    def sequence_matching_primitive(self, p, q, n, num_output_nodes=NUM_CLASSES):
         with tf.variable_scope("sequence_matiching_primitive", reuse=tf.AUTO_REUSE):
             q_sub_p = p - q  # TODO try with module
             q_mul_p = tf.multiply(p , q)
@@ -1145,8 +1151,8 @@ class GroundedTextualEntailmentModel(object):
             b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
             z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
             z = tf.reshape(z, (self.options.batch_size, -1))
-            W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
-            b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+            W_score= tf.get_variable("W_score", [num_output_nodes, 4*n], dtype=tf.float32)
+            b_score = tf.get_variable("b_score", [num_output_nodes], dtype=tf.float32)
             score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
             return score
 
@@ -1154,8 +1160,8 @@ class GroundedTextualEntailmentModel(object):
     def image_sequence_matching(self, n):
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
         I = tf.transpose(self.I, perm=[1,0,2]) #[NUM_FEATS, B, FEAT_SIZE]
-        scores = tf.map_fn(lambda x: self.sequence_matching_primitive(x, q, n), I, dtype=q.dtype) #[NUM_FEATS, NUM_CLASSES]
-        self.score = tf.reduce_sum(scores, axis=0) #[NUM_CLASSES]
+        scores = tf.map_fn(lambda x: self.sequence_matching_primitive(x, q, n), I, dtype=q.dtype) #[NUM_FEATS, BATCH, NUM_CLASSES]
+        self.score = tf.reduce_sum(scores, axis=0) #[BATCH, NUM_CLASSES]
 
         self.prob = tf.nn.softmax(self.score)
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
@@ -1173,6 +1179,40 @@ class GroundedTextualEntailmentModel(object):
 
         loss_summ = tf.summary.scalar('loss', self.loss)
         self.train_summary.append(loss_summ)
+
+
+    def image_sequence_matching_to_embedding(self, n):
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+        I = tf.transpose(self.I, perm=[1,0,2]) #[NUM_FEATS, B, FEAT_SIZE]
+        scores = tf.map_fn(lambda x: self.sequence_matching_primitive(x, q, n, self.options.embedding_size), I, dtype=q.dtype) #[NUM_FEATS, BATCH, EMBEDDING_SIZE]
+        self.score = tf.reduce_sum(scores, axis=0) #[BATCH, EMB_SIZE]
+
+        self.score = highway(self.score, self.options.embedding_size, tf.nn.relu)
+
+        #self.prob = tf.nn.softmax(self.score)
+        gold_matrix = self.label_to_embedding(self.labels)
+        losses = tf.map_fn(lambda x: abs(cosine_distance(x[0], x[1])), (self.score, gold_matrix), dtype=tf.float32) #[BATCH]
+        self.loss = tf.reduce_mean(losses)
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
+    def label_to_embedding(self, labels):
+        # id words new_words id embedding
+        #ids = tf.map_fn(lambda x: self.labelid2id[x], labels, dtype=tf.int32)
+        gold_matrix = tf.nn.embedding_lookup(self.embeddings, labels, name='labels_lookup')
+        return gold_matrix
 
 
     def sequence_matching_multiperspective(self, n):
@@ -1550,6 +1590,15 @@ class GroundedTextualEntailmentModel(object):
             self.predict_op = tf.cast(tf.argmax(self.softmax_score, axis=-1), tf.int32, name='predict_op')
             #conf_mat = tf.confusion_matrix(self.labels, self.predict_op, NUM_CLASSES)
 
+    def prediction_layer_embedding(self):
+        with tf.name_scope('PREDICTION'):
+            #[BATCH, EMB_SIZE] -> [BATCH, 3] -> [BATCH, 1]
+            label_keys = [self.labelid2id[word] for word in range(NUM_CLASSES)]
+            keys = tf.convert_to_tensor(label_keys)
+            label_embeddings = tf.nn.embedding_lookup(self.embeddings, keys, name='labels_lookup')
+            similarities = tf.map_fn(lambda x: tf.map_fn(lambda y: - abs(cosine_distance(x, y)), label_embeddings, dtype=tf.float32), self.score, dtype=self.score.dtype) #[BATCH, 3]
+            self.predict_op = tf.cast(tf.argmax(similarities, axis=-1), tf.int32, name='predict_op')
+
     def create_evaluation_graph(self):
         with tf.name_scope('eval'):
             # self.precision = tf.placeholder(tf.float32, [])
@@ -1575,6 +1624,7 @@ class GroundedTextualEntailmentModel(object):
                                     self.word2id,
                                     self.label2id,
                                     self.rel2id,
+                                    labelid2id=self.labelid2id,
                                     img2vec=self.img2vec,
                                     max_len_p=self.options.max_len_p,
                                     max_len_h=self.options.max_len_h,
@@ -1594,8 +1644,13 @@ class GroundedTextualEntailmentModel(object):
                 feed_dict[self.H_rel] = batch.H_rel
                 feed_dict[self.H_lv] = batch.H_lv
             [p] = self.session.run([self.predict_op], feed_dict=feed_dict)
-            predictions += [_ for _ in p]
+            if self.labelid2id is None:
+                predictions += [_ for _ in p]
+            else:
+                predictions += [self.labelid2id[_] for _ in p]
             labels += [_ for _ in batch.labels]
+        #print("PRED ", predictions[:15])
+        #print("LABELS ", labels[:15])
 
         if self.options.decay:
             [lr] = self.session.run([self.learning_rate])
@@ -1628,6 +1683,7 @@ class GroundedTextualEntailmentModel(object):
                                                                   self.word2id,
                                                                   self.label2id,
                                                                   self.rel2id,
+                                                                  labelid2id=self.labelid2id,
                                                                   img2vec=self.img2vec,
                                                                   max_len_p=self.options.max_len_p,
                                                                   max_len_h=self.options.max_len_h,

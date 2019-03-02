@@ -13,12 +13,15 @@ from gte.utils.dic import dic_lookup_case_sensitive
 
 class Batch(object):
     """Batch"""
-    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, P_lv=None, H_lv=None, P_rel=None, H_rel=None, full_img=False):
+    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, labelid2id=None, P_lv=None, H_lv=None, P_rel=None, H_rel=None, full_img=False):
         self.size = batch_size
         lookup = lambda x: dic_lookup_case_sensitive(word2id, x, UNK)
         self.P = self._map_sequences_id(P, lookup, max_len_p)
         self.H = self._map_sequences_id(H, lookup, max_len_h)
-        self.labels = np.array([label2id[label] for label in labels])
+        if not labelid2id:
+            self.labels = np.array([label2id[label] for label in labels])
+        else:
+            self.labels = np.array([labelid2id[label2id[label]] for label in labels])
         self.lengths_P = np.array([min(len(p), max_len_p) for p in P])
         self.lengths_H = np.array([min(len(h), max_len_h) for h in H])
         self.IDs = np.array(IDs)
@@ -53,9 +56,9 @@ class Batch(object):
         return pad_sequences(sequences, maxlen=maxlen, dtype='int32', padding='post', truncating='post', value=PAD)
 
 
-def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, dataset="VESNLI"):
+def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, dataset="VESNLI"):
     if dataset == "VESNLI":
-        return generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec, max_len_p, max_len_h, with_DEP)
+        return generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id, img2vec, max_len_p, max_len_h, with_DEP)
     else:
         return generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec, max_len_p, max_len_h, with_DEP)
 
@@ -130,7 +133,7 @@ def generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img
             last_batch = False
 
 
-def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False):
+def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False):
     translation = {ord(char): " {}".format(char) for char in string.punctuation}
     with open(dataset_file) as f:
         last_batch = False
@@ -174,7 +177,7 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, i
                     I = np.array([img2vec.get_features(i[0]) for i in I])
                 if not with_DEP:
                     P_lv = None
-                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, P_lv, H_lv, P_rel, H_rel)
+                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, labelid2id, P_lv, H_lv, P_rel, H_rel)
             yield batch
             end_epoch = last_batch
             last_batch = False

@@ -20,13 +20,21 @@ def main(options, ID):
 
     embeddings, word2id, id2word = words_to_dictionary(words, options.embedding_name, options.embedding_size)
     label2id, id2label = index_map(list(labels))
+    if options.sequence_matching == "image_embedding":
+        labels = ["entailment", "contradiction", "neutral"]
+        label_words = ["implication", "conflict", "neutral"]
+        label2wordid = {word: word2id[word] for word in label_words}
+        labelid2id = {label2id[word]: label2wordid[ww] for word,ww in zip(labels, label_words)}
+    else:
+        labelid2id = None
+
     rel2id, id2rel = index_map(DEP_REL)
 
     # image2vec = Image2vec(has_model=True)
     # image2vec.compute_all_feats_and_store()
 
     # Model as context manager
-    with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel) as gte_model:
+    with GroundedTextualEntailmentModel(options, ID, embeddings, word2id, id2word, label2id, id2label, rel2id, id2rel, labelid2id) as gte_model:
         gte_model.fit()
 
 
