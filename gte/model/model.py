@@ -1183,7 +1183,7 @@ class GroundedTextualEntailmentModel(object):
 
     def image_sequence_matching_to_embedding(self, n):
         q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
-        I = tf.transpose(self.I, perm=[1,0,2]) #[NUM_FEATS, B, FEAT_SIZE]
+        I = tf.transpose(self.I, perm=[1, 0, 2])  #[NUM_FEATS, B, FEAT_SIZE]
         scores = tf.map_fn(lambda x: self.sequence_matching_primitive(x, q, n, self.options.embedding_size), I, dtype=q.dtype) #[NUM_FEATS, BATCH, EMBEDDING_SIZE]
         self.score = tf.reduce_sum(scores, axis=0) #[BATCH, EMB_SIZE]
 
@@ -1191,8 +1191,10 @@ class GroundedTextualEntailmentModel(object):
 
         #self.prob = tf.nn.softmax(self.score)
         gold_matrix = self.label_to_embedding(self.labels)
-        losses = tf.map_fn(lambda x: abs(cosine_distance(x[0], x[1])), (self.score, gold_matrix), dtype=tf.float32) #[BATCH]
+
+        losses = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.score, gold_matrix), dtype=tf.float32) #[BATCH]
         self.loss = tf.reduce_mean(losses)
+
         clipper = 50
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
         tvars = tf.trainable_variables()
@@ -1596,7 +1598,7 @@ class GroundedTextualEntailmentModel(object):
             label_keys = [self.labelid2id[word] for word in range(NUM_CLASSES)]
             keys = tf.convert_to_tensor(label_keys)
             label_embeddings = tf.nn.embedding_lookup(self.embeddings, keys, name='labels_lookup')
-            similarities = tf.map_fn(lambda x: tf.map_fn(lambda y: - abs(cosine_distance(x, y)), label_embeddings, dtype=tf.float32), self.score, dtype=self.score.dtype) #[BATCH, 3]
+            similarities = tf.map_fn(lambda x: tf.map_fn(lambda y: cosine_distance(x, y), label_embeddings, dtype=tf.float32), self.score, dtype=self.score.dtype) #[BATCH, 3]
             self.predict_op = tf.cast(tf.argmax(similarities, axis=-1), tf.int32, name='predict_op')
 
     def create_evaluation_graph(self):
