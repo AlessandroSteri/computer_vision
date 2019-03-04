@@ -31,3 +31,16 @@ def cnn_auto_encoder(data, batch_size, dim_width=256, dim_height=256, nchannels=
 #### Inference Code
         # img = sess.run([logits], feed_dict={data: np.array([infer_data[i]])})
     return cost, enc_conv2
+
+def cnn_img_encoder(data, batch_size, dim_width=256, dim_height=256, nchannels=3):
+    # data = tf.placeholder(tf.float32, [batch_size, dim_width, dim_height, nchannels], name='raw_img')
+    # TODO use range
+
+    # ENCODE
+    enc_conv0 = tf.layers.conv2d(data, 64, 3, activation=tf.nn.relu)
+    enc_conv0 = tf.layers.max_pooling2d(enc_conv0, 2, 2)
+    enc_conv1 = tf.layers.conv2d(enc_conv0, 32, 3, activation=tf.nn.relu)
+    enc_conv1 = tf.layers.max_pooling2d(enc_conv1, 2, 2)
+    enc_conv2 = tf.layers.conv2d(enc_conv1, 16, 3, activation=tf.nn.relu)
+    enc_conv2 = tf.layers.max_pooling2d(enc_conv2, 2, 2)  # TODO check shape and return
+    return enc_conv2

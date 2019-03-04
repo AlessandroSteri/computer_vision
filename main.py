@@ -87,6 +87,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--restore", dest="restore", action='store_true', help="Restore model from previous best.")
     cmdLineParser.add_argument('--sequence_matching', action="store", dest="sequence_matching", default="", type=str, help="Sequence matching to use.")
     cmdLineParser.add_argument("--autoencoder", dest="autoencoder", action='store_true', help="Disables VGG and uses a CNN autoencoder to compute features.")
+    cmdLineParser.add_argument("--img_encoder", dest="img_encoder", action='store_true', help="Disables VGG and uses a CNN img_encoder to compute features.")
     options = cmdLineParser.parse_args()
     # }}}
 
