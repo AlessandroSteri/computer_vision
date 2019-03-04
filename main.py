@@ -20,7 +20,7 @@ def main(options, ID):
 
     embeddings, word2id, id2word = words_to_dictionary(words, options.embedding_name, options.embedding_size)
     label2id, id2label = index_map(list(labels))
-    if options.sequence_matching == "image_embedding":
+    if options.sequence_matching == "image_embedding" or options.with_top_down_embedding:
         labels = ["entailment", "contradiction", "neutral"]
         label_words = ["implication", "conflict", "neutral"]
         label2wordid = {word: word2id[word] for word in label_words}
@@ -76,6 +76,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument("--attentive_swap", dest="attentive_swap", action='store_true', help="Applies cross multihead attention to PI vs HI and HI vs PI.")
     cmdLineParser.add_argument("--with_cos_PH", dest="with_cos_PH", action='store_true', help="Use cosine similarity between context_p and context_h.")
     cmdLineParser.add_argument("--with_top_down", dest="with_top_down", action='store_true', help="Use top down image attention.")
+    cmdLineParser.add_argument("--with_top_down_embedding", dest="with_top_down_embedding", action='store_true', help="Use top down image attention with word embedding as output.")
     cmdLineParser.add_argument("--with_P_top_down", dest="with_P_top_down", action='store_true', help="Use top down image attention for P.")
     cmdLineParser.add_argument("--with_mlp", dest="with_mlp", action='store_true', help="Use MLP in top down image attention.")
     cmdLineParser.add_argument("--baseline", dest="baseline", action='store_true', help="Uses only H to see dataset biases and compute a baseline for the task.")
@@ -113,6 +114,7 @@ if __name__ == '__main__':
     if options.wo_SW: model_info += 'SWlower.'
     if options.with_cos_PH: model_info += 'cosPH.'
     if options.with_top_down: model_info += 'topDown.'
+    if options.with_top_down_embedding: model_info += 'topDownEmb.'
     if options.with_mlp: model_info += 'mlp.'
     if options.with_P_top_down: model_info += 'P_topDown.'
     if options.decay: model_info += 'Dec_{}_{}.'.format(options.decay_step, options.decay_rate)

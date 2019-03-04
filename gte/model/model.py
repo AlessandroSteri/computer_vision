@@ -102,6 +102,8 @@ class GroundedTextualEntailmentModel(object):
             self.baseline()
         elif self.options.with_top_down:
             self.image_top_down_attention_later()
+        elif self.options.with_top_down_embedding:
+            self.image_top_down_attention_layer_with_embedding()
         elif self.options.sequence_matching == 'sequence_matching':
             self.sequence_matching(self.options.hidden_size)
         elif self.options.sequence_matching == 'image':
@@ -142,7 +144,7 @@ class GroundedTextualEntailmentModel(object):
 
         #self.relation_networks_ranker()
 
-        if self.options.sequence_matching == "image_embedding":
+        if self.options.sequence_matching == "image_embedding" or self.options.with_top_down_embedding:
             self.prediction_layer_embedding()
         else:
             self.prediction_layer()
@@ -1464,6 +1466,110 @@ class GroundedTextualEntailmentModel(object):
 
         loss_summ = tf.summary.scalar('loss', self.loss)
         self.train_summary.append(loss_summ)
+
+
+    def image_top_down_attention_layer_with_embedding(self):
+        cell_fw_H = tf.contrib.rnn.GRUBlockCellV2(256, name="fw_cells_H")
+
+        outputs, self.H_states = tf.nn.dynamic_rnn(cell_fw_H, self.H_lookup, dtype=tf.float32, swap_memory=True, sequence_length=self.lengths_H)
+
+        #For each location i = 1...K in the image, the feature
+        #vector v_i is concatenated with the question embedding q
+        H_embedding = self.H_states #[batch_size x H] GRU one direction
+
+        feat_H = tf.map_fn(lambda i: tf.map_fn(lambda x: tf.concat([x, H_embedding[i]], 0), self.I[i]), tf.convert_to_tensor(list(range(self.options.batch_size)), dtype=tf.int32), dtype=tf.float32) #[batch_size x NUM_FEATS x (FEAT_SIZE + HH)]
+        #Passed through a non-linear layer f_a...
+        HH = self.options.hidden_size# * 2
+        N = 512
+        W_nl = tf.get_variable("W_nl", [N, FEAT_SIZE + HH], dtype=tf.float32)
+        b_nl = tf.get_variable("b_nl", [N], dtype=tf.float32)
+        feat_H = tf.reshape(tf.transpose(tf.to_float(feat_H), perm=[2,0,1]), [FEAT_SIZE + HH, -1]) #[FEAT_SIZE + HH, batch_size * NUM_FEATS]
+        y_att = tf.tanh(tf.transpose(tf.matmul(W_nl, feat_H)) + b_nl) # [batch_size x NUM_FEATS, N]
+        W_nl2 = tf.get_variable("W_nl2", [N, FEAT_SIZE + HH], dtype=tf.float32)
+        b_nl2 = tf.get_variable("b_nl2", [N], dtype=tf.float32)
+        g_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_nl2, feat_H)) + b_nl2) # [batch_size x NUM_FEATS, N]
+        y = tf.multiply(y_att, g_att)  # [batch_size x NUM_FEATS, N]
+        W_a = tf.get_variable("W_a", [1, FEAT_SIZE], dtype=tf.float32)
+        a = tf.matmul(W_a, tf.transpose(y)) # [1, batch_size x NUM_FEATS]
+        #...to obtain a scalar attention weight α_{i,t}
+        alpha = tf.nn.softmax(tf.transpose(a)) # [1, batch_size x NUM_FEATS]
+        alpha = tf.reshape(alpha, [self.options.batch_size, NUM_FEATS, 1])
+        #The image features are then weighted by the normalized values and summed
+        sum_weights = tf.reduce_sum(alpha, axis=1) #[batch_size]
+        features_att = tf.map_fn(lambda x: tf.multiply(x[1], x[0]), (self.I, alpha), dtype=alpha.dtype) #[batch_size x NUM_FEATS x FEAT_SIZE]
+        self.features_att = tf.map_fn(lambda x: tf.reduce_sum(x[0], 0) / x[1], (features_att, sum_weights), dtype=features_att.dtype) #[batch_size x FEAT_SIZE]
+
+        DIM = 400
+
+        #The representations of the question (q) and of the image (v̂) are passed through non-linear layers...
+        W_h_nl = tf.get_variable("W_h_nl", [DIM, HH], dtype=tf.float32)
+        b_h_nl = tf.get_variable("b_h_nl", [DIM], dtype=tf.float32)
+        y_h_att = tf.tanh(tf.transpose(tf.matmul(W_h_nl, tf.transpose(H_embedding))) + b_h_nl) # [batch_size x H]
+
+        W_h_nl2 = tf.get_variable("W_h_nl2", [DIM, HH], dtype=tf.float32)
+        b_h_nl2 = tf.get_variable("b_h_nl2", [DIM], dtype=tf.float32)
+        g_h_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_h_nl2, tf.transpose(H_embedding))) + b_h_nl2) # [batch_size x H]
+        y_h = tf.multiply(y_h_att, g_h_att)  # [batch_size x H]
+
+
+        W_I_nl = tf.get_variable("W_I_nl", [DIM, FEAT_SIZE], dtype=tf.float32)
+        b_I_nl = tf.get_variable("b_I_nl", [DIM], dtype=tf.float32)
+        y_I_att = tf.tanh(tf.transpose(tf.matmul(W_I_nl, tf.transpose(self.features_att))) + b_I_nl) # [batch_size x FEAT_SIZE]
+
+        W_I_nl2 = tf.get_variable("W_I_nl2", [DIM, FEAT_SIZE], dtype=tf.float32)
+        b_I_nl2 = tf.get_variable("b_I_nl2", [DIM], dtype=tf.float32)
+        g_I_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_I_nl2, tf.transpose(self.features_att))) + b_I_nl2) # [batch_size x FEAT_SIZE]
+        y_I = tf.multiply(y_I_att, g_I_att)  # [batch_size x H]
+
+        #...and then combined with a simple Hadamard product
+        self.fusion = tf.multiply(y_h, y_I) # [batch_size x DIM]
+
+        if self.options.with_mlp:
+            mlp1 = mlp(self.fusion, DIM, self.options.embedding_size, name="mlp1")
+            mlp2 = mlp(self.fusion, DIM, self.options.embedding_size, name="mlp2")
+            self.score = mlp1 + mlp2
+        else:
+            #Passes the joint embedding through a non-linear layer f_o...
+            W_fusion_nl = tf.get_variable("W_fusion_nl", [self.options.embedding_size, DIM], dtype=tf.float32)
+            b_fusion_nl = tf.get_variable("b_fusion_nl", [self.options.embedding_size], dtype=tf.float32)
+            y_fusion_att = tf.tanh(tf.transpose(tf.matmul(W_fusion_nl, tf.transpose(self.fusion))) + b_fusion_nl) # [batch_size x FEAT_SIZE / 2]
+
+            W_fusion_nl2 = tf.get_variable("W_fusion_nl2", [self.options.embedding_size, DIM], dtype=tf.float32)
+            b_fusion_nl2 = tf.get_variable("b_fusion_nl2", [self.options.embedding_size], dtype=tf.float32)
+            g_fusion_att = tf.nn.sigmoid(tf.transpose(tf.matmul(W_fusion_nl2, tf.transpose(self.fusion))) + b_fusion_nl2) # [batch_size x FEAT_SIZE / 2]
+            y_fusion = tf.multiply(y_fusion_att, g_fusion_att)  # [batch_size x FEAT_SIZE / 2]
+
+            #...then through a linear mapping w_o to predict a score ŝ for each of the 3 candidates
+
+            dropout_prob = 0.5
+            #dimension = int(FEAT_SIZE / 2) #int(FEAT_SIZE / 2 + self.options.hidden_size * 2)
+            dimension = DIM
+
+            gated_first_layer = tf.nn.dropout(gated_tanh(y_fusion, dimension), keep_prob=dropout_prob)
+            gated_second_layer = tf.nn.dropout(gated_tanh(gated_first_layer, dimension), keep_prob=dropout_prob)
+            gated_third_layer = tf.nn.dropout(gated_tanh(gated_second_layer, dimension), keep_prob=dropout_prob)
+
+            self.score = tf.contrib.layers.fully_connected(gated_third_layer, self.options.embedding_size, activation_fn=None)
+
+        self.score = highway(self.score, self.options.embedding_size, tf.nn.relu)
+        gold_matrix = self.label_to_embedding(self.labels)
+        losses = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.score, gold_matrix), dtype=tf.float32) #[BATCH]
+        self.loss = tf.reduce_mean(losses) * tf.cast(tf.count_nonzero(losses), tf.float32)
+        clipper = 50
+
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
 
     def matching_layer(self):
         pass
