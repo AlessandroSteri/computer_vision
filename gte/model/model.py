@@ -1195,7 +1195,7 @@ class GroundedTextualEntailmentModel(object):
         gold_matrix = self.label_to_embedding(self.labels)
 
         losses = tf.map_fn(lambda x: 1 - cosine_distance(x[0], x[1]), (self.score, gold_matrix), dtype=tf.float32) #[BATCH]
-        self.loss = tf.reduce_mean(losses) * tf.cast(tf.count_nonzero(losses), tf.float32)
+        self.loss = tf.reduce_mean(losses) * 100 * tf.cast(tf.count_nonzero(losses), tf.float32) / self.options.batch_size
 
         clipper = 50
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
