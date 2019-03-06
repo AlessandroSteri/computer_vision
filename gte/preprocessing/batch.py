@@ -10,10 +10,15 @@ from keras.preprocessing import image
 
 from gte.info.info import MAX_LEN_P, MAX_LEN_H, UNK, PAD, IMG_DATA, HEIGHT, WIDTH, CHANNELS
 from gte.utils.dic import dic_lookup_case_sensitive
+import cv2
+import scipy
+from scipy.misc import imread
+import random
+# import matplotlib.pyplot as plt
 
 class Batch(object):
     """Batch"""
-    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, labelid2id=None, P_lv=None, H_lv=None, P_rel=None, H_rel=None, full_img=False):
+    def __init__(self, batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, I_paths, labelid2id=None, P_lv=None, H_lv=None, P_rel=None, H_rel=None, full_img=False, with_keypoints=False):
         self.size = batch_size
         lookup = lambda x: dic_lookup_case_sensitive(word2id, x, UNK)
         self.P = self._map_sequences_id(P, lookup, max_len_p)
@@ -25,7 +30,11 @@ class Batch(object):
         self.lengths_P = np.array([min(len(p), max_len_p) for p in P])
         self.lengths_H = np.array([min(len(h), max_len_h) for h in H])
         self.IDs = np.array(IDs)
-        self.I = I
+        if not with_keypoints:
+            self.I = I
+        else:
+            self.I = [self.extract_features(image_path, vector_size=32) for image_path in I_paths]
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
 
         if full_img:
             import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
@@ -50,20 +59,48 @@ class Batch(object):
         assert len(self.labels) == len(self.H)
         assert len(self.labels) == self.size
 
+    def extract_features(self, image_path, vector_size=32):
+        image = imread(image_path, mode="RGB")
+        try:
+            # Using KAZE, cause SIFT, ORB and other was moved to additional module
+            # which is adding addtional pain during install
+            alg = cv2.KAZE_create()
+            # Dinding image keypoints
+            kps = alg.detect(image)
+            # Getting first 32 of them.
+            # Number of keypoints is varies depend on image size and color pallet
+            # Sorting them based on keypoint response value(bigger is better)
+            kps = sorted(kps, key=lambda x: -x.response)[:vector_size]
+            # computing descriptors vector
+            kps, dsc = alg.compute(image, kps)
+            # Flatten all of them in one big vector - our feature vector
+            dsc = dsc.flatten()
+            # Making descriptor of same size
+            # Descriptor vector size is 64
+            needed_size = (vector_size * 64)
+            if dsc.size < needed_size:
+                # if we have less the 32 descriptors then just adding zeros at the
+                # end of our feature vector
+                dsc = np.concatenate([dsc, np.zeros(needed_size - dsc.size)])
+        except cv2.error as e:
+            print('Error: ', e)
+            return None
+        return dsc
+
     def _map_sequences_id(self, sequences, lookup, maxlen):
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         sequences = [list(map(lookup, sequence)) for sequence in sequences]
         return pad_sequences(sequences, maxlen=maxlen, dtype='int32', padding='post', truncating='post', value=PAD)
 
 
-def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, dataset="VESNLI"):
+def generate_batch(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, dataset="VESNLI", with_keypoints=False):
     if dataset == "VESNLI":
-        return generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id, img2vec, max_len_p, max_len_h, with_DEP)
+        return generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id, img2vec, max_len_p, max_len_h, with_DEP, with_keypoints=with_keypoints)
     else:
         return generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec, max_len_p, max_len_h, with_DEP)
 
 # use a generator
-def generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False):
+def generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, with_keypoints=False):
     # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
     print("Old dataset")
     with open(dataset_file) as f:
@@ -133,7 +170,7 @@ def generate_batch_snli(dataset_file, batch_size, word2id, label2id, rel2id, img
             last_batch = False
 
 
-def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False):
+def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, labelid2id=None, img2vec=None, max_len_p=MAX_LEN_P, max_len_h=MAX_LEN_H, with_DEP=False, with_keypoints=False):
     translation = {ord(char): " {}".format(char) for char in string.punctuation}
     with open(dataset_file) as f:
         last_batch = False
@@ -160,7 +197,7 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, l
                         P += [str(line['sentence1']).strip().translate(translation).split()]
                         ID = str(line['pairID']).strip().split("#")[1]
                         IDs += ID
-    
+
                 #complete batch
                 if img2vec == None:
                 # if full_img:
@@ -169,6 +206,7 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, l
                         img = image.load_img(IMG_DATA + "/" + img_id, target_size=(256, 256)) #[256 x 256]
                         img_array = image.img_to_array(img) #[256 x 256 x channels]
                         return np.expand_dims(img_array, axis=0) #[1 x 256 x 256 x channels]
+                    I_paths = [ IMG_DATA + "/" + img_id[0] for img_id in I ]
                     I = [id_to_img(iid[0]) for iid in I]
                     I = np.reshape(I, (batch_size, WIDTH, HEIGHT, CHANNELS))
                     # I = np.ones([batch_size, 49, 512], dtype=np.float32)
@@ -177,7 +215,7 @@ def generate_batch_vesnli(dataset_file, batch_size, word2id, label2id, rel2id, l
                     I = np.array([img2vec.get_features(i[0]) for i in I])
                 if not with_DEP:
                     P_lv = None
-                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, labelid2id, P_lv, H_lv, P_rel, H_rel)
+                batch = Batch(batch_size, P, H, I, IDs, labels, word2id, label2id, max_len_p, max_len_h, rel2id, I_paths, labelid2id, P_lv, H_lv, P_rel, H_rel, with_keypoints=with_keypoints)
             yield batch
             end_epoch = last_batch
             last_batch = False

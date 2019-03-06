@@ -34,7 +34,7 @@ class GroundedTextualEntailmentModel(object):
         self.session = tf.Session()
         if self.options.restore: self.restore_session()
         self.best_f1 = self.get_best_f1()
-        self.img2vec = Image2vec() if not (options.autoencoder or options.img_encoder) else None
+        self.img2vec = Image2vec() if not (options.autoencoder or options.img_encoder or options.keypoints) else None
         self.max_f1 = 0
         self.max_f1_update = []
 
@@ -96,7 +96,9 @@ class GroundedTextualEntailmentModel(object):
         self.embedding_layer()
         self.context_layer()
 
-        if self.options.autoencoder:
+        if self.options.keypoints:
+            self.sequence_matching_keypoints(self.options.hidden_size)
+        elif self.options.autoencoder:
             self.sequence_matching_autoencode(self.options.hidden_size)
         elif self.options.img_encoder:
             self.sequence_matching_img_encoder(self.options.hidden_size)
@@ -164,9 +166,11 @@ class GroundedTextualEntailmentModel(object):
             self.P = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_p], name='P')  # shape [batch_size, max_len_p]
             self.H = tf.placeholder(tf.int32, shape=[self.options.batch_size, self.options.max_len_h], name='H')  # shape [batch_size, max_len_h]
             if self.options.autoencoder or self.options.img_encoder:
-                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, WIDTH, HEIGHT, CHANNELS], name='H')  # shape [batch_size, max_len_h]
+                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, WIDTH, HEIGHT, CHANNELS], name='I')  # shape [batch_size, max_len_h]
+            elif self.options.keypoints:
+                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, 2048], name='I')  # shape [batch_size, max_len_h]
             else:
-                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, NUM_FEATS, FEAT_SIZE], name='H')  # shape [batch_size, max_len_h]
+                self.I = tf.placeholder(tf.float32, shape=[self.options.batch_size, NUM_FEATS, FEAT_SIZE], name='I')  # shape [batch_size, max_len_h]
             self.labels = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Labels')  # shape [batch_size]
             self.lengths_P = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_P')  # shape [batch_size]
             self.lengths_H = tf.placeholder(tf.int32, shape=[self.options.batch_size], name='Lengths_H')  # shape [batch_size]
@@ -363,6 +367,52 @@ class GroundedTextualEntailmentModel(object):
         b_2 = tf.get_variable("b_2", [NUM_CLASSES], dtype=tf.float32)
         # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
         self.score = tf.transpose(tf.matmul(W_2, tf.transpose(tf.nn.relu(z)))) + b_2
+
+        self.prob = tf.nn.softmax(self.score)
+        gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.score, labels=gold_matrix))
+        clipper = 50
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        tvars = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tvars if v.get_shape().ndims > 1])
+        self.loss = self.loss + 1e-5 * l2_loss
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clipper)
+        if self.options.decay:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
+
+        loss_summ = tf.summary.scalar('loss', self.loss)
+        self.train_summary.append(loss_summ)
+
+
+    def sequence_matching_keypoints(self, n):
+        # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+        # p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
+
+        # p = tf.reshape(self.I, (self.options.batch_size, -1))
+        W_i = tf.get_variable("w_i", [2048, 2*self.options.hidden_size], dtype=tf.float32)
+        b_i = tf.get_variable("b_i", [2*self.options.hidden_size], dtype=tf.float32)
+        p = tf.matmul(self.I, W_i) + b_i
+
+        q = tf.concat([self.H_states[0][0], self.H_states[0][1]], -1)  # [B, 2*H]
+
+        q_sub_p = p - q  # TODO try with module
+        q_mul_p = tf.multiply(p , q)
+        p = tf.expand_dims(p, axis=1)
+        q = tf.expand_dims(q, axis=1)
+        q_sub_p = tf.expand_dims(q_sub_p, axis=1)
+        q_mul_p = tf.expand_dims(q_mul_p, axis=1)
+        x_cl = tf.concat([p, q, q_sub_p, q_mul_p], 1)  # [B, 4, HH] #TODO add max e min pointwise
+        x_cl_flat = tf.reshape(x_cl, (self.options.batch_size*4, 2*self.options.hidden_size))
+        W_z= tf.get_variable("W_z", [n, 2*self.options.hidden_size], dtype=tf.float32)
+        b_z = tf.get_variable("b_z", [n], dtype=tf.float32)
+        z = tf.transpose(tf.matmul(W_z, tf.transpose(x_cl_flat))) + b_z
+        z = tf.reshape(z, (self.options.batch_size, -1))
+        W_score= tf.get_variable("W_score", [NUM_CLASSES, 4*n], dtype=tf.float32)
+        b_score = tf.get_variable("b_score", [NUM_CLASSES], dtype=tf.float32)
+        # score = tf.nn.xw_plus_b(tf.nn.relu(z), W_score, b_score)
+        self.score = tf.transpose(tf.matmul(W_score, tf.transpose(tf.nn.relu(z)))) + b_score
 
         self.prob = tf.nn.softmax(self.score)
         gold_matrix = tf.one_hot(self.labels, NUM_CLASSES, dtype=tf.float32)
@@ -1798,7 +1848,8 @@ class GroundedTextualEntailmentModel(object):
                                     img2vec=self.img2vec,
                                     max_len_p=self.options.max_len_p,
                                     max_len_h=self.options.max_len_h,
-                                    with_DEP=self.options.with_DEP):
+                                    with_DEP=self.options.with_DEP,
+                                    with_keypoints=self.options.keypoints):
             if batch is None: break
             feed_dict = {self.P: batch.P,
                          self.H: batch.H,
@@ -1857,7 +1908,8 @@ class GroundedTextualEntailmentModel(object):
                                                                   img2vec=self.img2vec,
                                                                   max_len_p=self.options.max_len_p,
                                                                   max_len_h=self.options.max_len_h,
-                                                                  with_DEP=self.options.with_DEP)),
+                                                                  with_DEP=self.options.with_DEP,
+                                                                  with_keypoints=self.options.keypoints)),
                                          total=math.ceil(LEN_TRAIN / self.options.batch_size)):
                 # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
                 if batch is None:

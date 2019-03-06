@@ -88,6 +88,7 @@ if __name__ == '__main__':
     cmdLineParser.add_argument('--sequence_matching', action="store", dest="sequence_matching", default="", type=str, help="Sequence matching to use.")
     cmdLineParser.add_argument("--autoencoder", dest="autoencoder", action='store_true', help="Disables VGG and uses a CNN autoencoder to compute features.")
     cmdLineParser.add_argument("--img_encoder", dest="img_encoder", action='store_true', help="Disables VGG and uses a CNN img_encoder to compute features.")
+    cmdLineParser.add_argument("--keypoints", dest="keypoints", action='store_true', help="Disables VGG and uses a openCV to compute features.")
     options = cmdLineParser.parse_args()
     # }}}
 
