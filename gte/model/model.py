@@ -12,6 +12,7 @@ from gte.images.image2vec import Image2vec
 from gte.att.attention import multihead_attention
 from gte.utils.path import mkdir
 from gte.auenc import cnn_auto_encoder, cnn_img_encoder
+from gte.fex.pickle_utils import pickle_load
 
 class GroundedTextualEntailmentModel(object):
     """Model for Grounded Textual Entailment."""
@@ -387,6 +388,7 @@ class GroundedTextualEntailmentModel(object):
 
 
     def sequence_matching_keypoints(self, n):
+        self.open_cv_feats = pickle_load('./chunks_features.pck')
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
         # p = tf.concat([self.P_states[0][0], self.P_states[0][1]], -1)  # [B, 2*H]
 
@@ -1851,6 +1853,8 @@ class GroundedTextualEntailmentModel(object):
                                     with_DEP=self.options.with_DEP,
                                     with_keypoints=self.options.keypoints):
             if batch is None: break
+            if self.options.keypoints:
+                batch.I = [self.open_cv_feats[img_id] for img_id in batch.I]
             feed_dict = {self.P: batch.P,
                          self.H: batch.H,
                          self.I: batch.I,
@@ -1916,6 +1920,8 @@ class GroundedTextualEntailmentModel(object):
                     print("End of epoch.")
                     break
                 step += 1
+                if self.options.keypoints:
+                    batch.I = [self.open_cv_feats[img_id] for img_id in batch.I]
                 run_metadata = tf.RunMetadata()
                 feed_dict = {self.P: batch.P,
                              self.H: batch.H,

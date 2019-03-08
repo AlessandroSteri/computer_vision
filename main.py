@@ -124,6 +124,7 @@ if __name__ == '__main__':
     if options.sequence_matching: model_info += 'SM_' + options.sequence_matching + '.'
     if options.autoencoder: model_info += 'AutEnc.'
     if options.baseline: model_info += 'baseline.'
+    if options.keypoints: model_info += 'keypoints.'
 
     exe_id = id_gen() # sort-of unique and monotonic id for tensorboard and logging
     ID = exe_id + env + model_info

@@ -33,7 +33,9 @@ class Batch(object):
         if not with_keypoints:
             self.I = I
         else:
-            self.I = [self.extract_features(image_path, vector_size=32) for image_path in I_paths]
+            # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
+            # self.I = [self.extract_features(image_path, vector_size=32) for image_path in I_paths]
+            self.I = [image_path.split('/')[-1] for image_path in I_paths]
         # import ipdb; ipdb.set_trace()  # TODO BREAKPOINT
 
         if full_img:
