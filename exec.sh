@@ -1,1 +1,2 @@
-time python3 main.py --dropout --gpu --step_check=500 --max_len_p=40 --max_len_h=30 --dev_env --trainable --learning_rate 0.001 --epoch 300  --keypoints # --restore # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2
+# time python3 main.py --dropout --gpu --step_check=500 --max_len_p=40 --max_len_h=30 --dev_env --trainable --learning_rate 0.001 --epoch 300  --keypoints --sequence_matching=image_embedding # --restore # --with_DEP --wo_SW #--attentive_my --attentive --with_cos_PH --with_img2
+time python3 main.py --dropout --gpu --step_check=500 --max_len_p=40 --max_len_h=30 --dev_env --trainable --learning_rate 0.001 --epoch 300 --with_img --sequence_matching="image_embedding"

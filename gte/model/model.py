@@ -1885,6 +1885,7 @@ class GroundedTextualEntailmentModel(object):
 
     def fit(self, evaluate=False, test=False):
         print("RunID: {}".format(self.ID))
+        errors = None
         tensorboard_dir = os.path.join(TB_DIR, self.ID)
         # with tf.Session() as session:
         session = self.session
@@ -1971,6 +1972,12 @@ class GroundedTextualEntailmentModel(object):
                         print("neutral:{}".format(self.label2id["neutral"]))
                         print("entailment:{}".format(self.label2id["entailment"]))
                         print('--------------------------------')
+                        if errors is None:
+                            errors = labels != eval_predictions
+                        else:
+                            errors += labels != eval_predictions
+                        print("ERRORS, max: {}, avg: {}, std: {}, min: {}".format(max(errors), np.mean(errors), np.std(errors), min(errors)))
+                        print(errors)
 
                         if f1 > self.max_f1:
                             print("New Max F1 for current model: {}, old was: {}".format(f1, self.max_f1))
