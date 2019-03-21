@@ -1972,10 +1972,11 @@ class GroundedTextualEntailmentModel(object):
                         print("neutral:{}".format(self.label2id["neutral"]))
                         print("entailment:{}".format(self.label2id["entailment"]))
                         print('--------------------------------')
+                        int_err = [int(l) for l in labels != eval_predictions]
                         if errors is None:
-                            errors = labels != eval_predictions
+                            errors = int_err
                         else:
-                            errors += labels != eval_predictions
+                            errors += int_err
                         print("ERRORS, max: {}, avg: {}, std: {}, min: {}".format(max(errors), np.mean(errors), np.std(errors), min(errors)))
                         print(errors)
 
