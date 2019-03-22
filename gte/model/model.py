@@ -1976,9 +1976,9 @@ class GroundedTextualEntailmentModel(object):
                         if errors is None:
                             errors = int_err
                         else:
-                            errors += int_err
+                            errors += [sum(e) for e in zip(errors, int_err)]
                         print("ERRORS, max: {}, avg: {}, std: {}, min: {}".format(max(errors), np.mean(errors), np.std(errors), min(errors)))
-                        print(errors)
+                        #print(errors)
 
                         if f1 > self.max_f1:
                             print("New Max F1 for current model: {}, old was: {}".format(f1, self.max_f1))
